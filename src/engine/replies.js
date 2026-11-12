@@ -5,6 +5,7 @@ import * as outlook from '../integrations/outlook.js';
 import { classifyReply } from '../integrations/ai.js';
 import { stopSequence } from './outreach.js';
 import { requalify } from './qualify.js';
+import { isRelay } from '../util.js';
 
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 
@@ -34,7 +35,7 @@ async function matchSentMessage(msg, fromEmail) {
     const m = await one(`SELECT * FROM messages WHERE conversation_id = $1 AND status = 'sent' ORDER BY sent_at DESC LIMIT 1`, [msg.conversationId]);
     if (m) return m;
   }
-  if (fromEmail) {
+  if (fromEmail && !isRelay(fromEmail)) {
     const m = await one(`SELECT * FROM messages WHERE lower(to_email) = $1 AND status = 'sent' ORDER BY sent_at DESC LIMIT 1`, [fromEmail]);
     if (m) return m;
   }
@@ -61,7 +62,13 @@ export async function applyReply(reply, message) {
     await stopSequence(empId, reply.category === 'bounce' ? 'Email bounced' : `Prospect replied (${labels[reply.category]})`);
   }
   if (reply.category === 'opt_out' || reply.category === 'bounce') {
-    await q(`INSERT INTO suppressions (kind, value, reason) VALUES ('email', $1, $2) ON CONFLICT DO NOTHING`, [contact.email.toLowerCase(), reply.category === 'bounce' ? 'Bounced' : 'Opted out']);
+    if (isRelay(contact.email)) {
+      // Shared PracticeMatch address: suppress this client only.
+      await q(`UPDATE employers SET decision = 'suppressed' WHERE id = $1`, [empId]);
+      await logEvent(empId, `Client suppressed (${reply.category === 'bounce' ? 'bounce' : 'opt-out'} via PracticeMatch forwarding address)`);
+    } else {
+      await q(`INSERT INTO suppressions (kind, value, reason) VALUES ('email', $1, $2) ON CONFLICT DO NOTHING`, [contact.email.toLowerCase(), reply.category === 'bounce' ? 'Bounced' : 'Opted out']);
+    }
   }
   if (reply.category === 'wrong_contact' || reply.category === 'bounce') await q('UPDATE contacts SET bad = true WHERE id = $1', [contact.id]);
   if (reply.category === 'interested') {

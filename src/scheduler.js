@@ -5,7 +5,7 @@ import { q, one } from './db.js';
 import { cfg } from './config.js';
 import { getSettings } from './settings.js';
 import { zoned, hhmmToMin } from './util.js';
-import { runDiscovery } from './engine/discovery.js';
+import { runDiscovery, runPracticeMatchScan } from './engine/discovery.js';
 import { pollReplies } from './engine/replies.js';
 import { sendTick } from './engine/outreach.js';
 
@@ -39,6 +39,14 @@ export async function tick(now = new Date()) {
 
   if (s.discoveryDays.includes(z.dow) && minutes >= hhmmToMin(s.discoveryTime)) {
     await guarded('discovery', () => runJob('discovery', z.ymd, () => runDiscovery({ trigger: 'schedule' })));
+  }
+
+  // Extra PracticeMatch scans (the first scan time is covered by the morning discovery run)
+  const P = s.practicematch || {};
+  if (P.enabled && s.discoveryDays.includes(z.dow)) {
+    for (const t of (P.scanTimes || []).slice(1)) {
+      if (minutes >= hhmmToMin(t)) await guarded('pm-scan', () => runJob('pm-scan', `${z.ymd}#${t}`, () => runPracticeMatchScan({ autoEnroll: true })));
+    }
   }
 
   const slot = Math.floor(minutes / Math.max(1, s.replyPollMinutes));

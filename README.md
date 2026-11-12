@@ -14,7 +14,8 @@ every 10 min    Inbox check ─► match reply ─► categorize ─► stop seq
 
 | When | Job | Limits that apply |
 |---|---|---|
-| 06:00, Mon–Fri | **Discovery**: PracticeMatch monitor → Lusha prospecting → Lusha contact lookup for employers with no contact → requalify everything → auto-enroll (only when supervised launch is off) | Lusha reveals per day (40), monthly credit budget (1,500), contacts per company (2) |
+| 06:00 and 18:00, Mon–Fri | **PracticeMatch scan** of today's in-house physician and APP postings |
+| 06:00, Mon–Fri | **Discovery**: PracticeMatch scan → (optional) Lusha prospecting → Lusha contact lookup for employers with no contact → requalify everything → auto-enroll (only when supervised launch is off) | Lusha reveals per day (40), monthly credit budget (1,500), contacts per company (2) |
 | 08:30–16:30, Mon–Fri | **Sending**, one email at a time | Daily cap (40), warm-up ramp (10 on day 1, +5 per send day), random 90–240 s spacing, 1 email per organization per day |
 | Every 10 min | **Inbox check**: replies, opt-outs, bounces, out-of-office | |
 
@@ -77,10 +78,23 @@ Use a Microsoft 365 admin account.
 
 ## Sources
 
-### PracticeMatch
-- **Working now: import.** Upload a CSV or JSON export on the Settings page, or `POST /api/import/practicematch`. Column names are matched flexibly: listing id, employer/facility, specialty, position, city/state or location, contact name/title/email/phone, date posted, link, description. Re-importing is safe: listings are keyed by id, and repeat openings at one employer are consolidated.
-- Listings whose text says "no agencies", "direct applicants only" and similar are held for review automatically.
-- **Next: the automated monitor.** `src/integrations/practicematch.js → fetchApprovedListings()` is the hook for the approved automated collection. It needs one walkthrough of your saved PracticeMatch searches to build. If you'd rather turn on the PracticeMatch API, the same hook takes that instead.
+### PracticeMatch (primary source)
+**Daily scan** at 06:00 and 18:00 ET (Settings → PracticeMatch scan):
+1. Reads PracticeMatch's **in-house** job boards (agency postings excluded) for jobs **posted today**:
+   - physician jobs: `/physicians/jobs/?jobAge=1&isFirm=0`
+   - advanced-practice jobs: `/advanced-practitioners/jobs/?jobAge=1&isFirm=0`
+2. Opens only job IDs it hasn't seen before and reads the job title, employer, location, specialty, role (Physician, NP, PA, CRNA, CNM), and the posting's **"Click to email"** address with its Opportunity code.
+3. Skips non-provider roles (psychologist, therapist, RN, technologist…) and flags "no agencies" wording for review.
+4. Pauses 1.5 s between requests. First scan of the day can take ~30 minutes; later scans read only new jobs.
+
+**One prospect per contact.**
+- **Direct recruiter emails** (most postings, e.g. `name@thedacare.org`) are one contact. All of that recruiter's jobs are grouped under one client, and they get **one** sequence: the first email plus two follow-ups.
+- **PracticeMatch forwarding addresses** (`…@practicematch.com`) are shared by PracticeMatch staff across many clients. They count **once per client**, and the subject keeps `Opportunity <code>` so PracticeMatch routes it to the right posting.
+- An opt-out or bounce from a forwarding address suppresses that client, not the shared address.
+
+Used under MedConnect's written permission from PracticeMatch for business development. PracticeMatch's job pages otherwise say contact is for job seekers only, so keep that permission on file.
+
+**Manual import** still works: Settings → Integrations → Import CSV.
 
 ### Lusha (API v3)
 - `POST /v3/contacts/prospecting`: daily nationwide search by job title, industry and US location. Results are previews and cost no reveal credits.

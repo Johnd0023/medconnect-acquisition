@@ -58,6 +58,10 @@ CREATE TABLE IF NOT EXISTS openings (
   UNIQUE (source, external_id)
 );
 CREATE INDEX IF NOT EXISTS openings_employer_ix ON openings (employer_id);
+ALTER TABLE openings ADD COLUMN IF NOT EXISTS pm_code text;
+ALTER TABLE openings ADD COLUMN IF NOT EXISTS contact_email text;
+ALTER TABLE openings ADD COLUMN IF NOT EXISTS title text;
+CREATE INDEX IF NOT EXISTS openings_contact_email_ix ON openings (lower(contact_email));
 
 CREATE TABLE IF NOT EXISTS contacts (
   id               serial PRIMARY KEY,
@@ -74,7 +78,10 @@ CREATE TABLE IF NOT EXISTS contacts (
   bad              boolean NOT NULL DEFAULT false,
   created_at       timestamptz NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS contacts_email_uq ON contacts (lower(email)) WHERE email IS NOT NULL;
+DROP INDEX IF EXISTS contacts_email_uq;
+-- A PracticeMatch forwarding address is shared by many clients, so uniqueness is per employer.
+CREATE UNIQUE INDEX IF NOT EXISTS contacts_employer_email_uq ON contacts (employer_id, lower(email)) WHERE email IS NOT NULL;
+CREATE INDEX IF NOT EXISTS contacts_email_ix ON contacts (lower(email));
 CREATE INDEX IF NOT EXISTS contacts_employer_ix ON contacts (employer_id);
 
 CREATE TABLE IF NOT EXISTS sequences (

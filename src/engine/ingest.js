@@ -1,7 +1,7 @@
 // Turn raw source records (PracticeMatch listings, Lusha contacts) into one employer record each,
 // with consolidated openings and deduplicated contacts.
 import { q, one, logEvent } from '../db.js';
-import { normDomain, normName, emailDomain, isFreeMail } from '../util.js';
+import { normDomain, normName, emailDomain, isFreeMail, isRelay } from '../util.js';
 import { EMPLOYER_TYPES as T, knownProviders } from '../settings.js';
 
 const SRC_LABEL = { PM: 'PracticeMatch', Lusha: 'Lusha', Referral: 'a referral', Manual: 'manual entry' };
@@ -78,7 +78,10 @@ export async function upsertEmployer({ name, domain, city, state, source, indust
 export async function addContact(employerId, c, source) {
   const email = c.email ? c.email.trim().toLowerCase() : null;
   if (email) {
-    const existing = await one('SELECT * FROM contacts WHERE lower(email) = $1', [email]);
+    // Forwarding addresses are matched within the employer; real addresses anywhere.
+    const existing = isRelay(email)
+      ? await one('SELECT * FROM contacts WHERE employer_id = $1 AND lower(email) = $2', [employerId, email])
+      : await one('SELECT * FROM contacts WHERE lower(email) = $1', [email]);
     if (existing) {
       if (!existing.sources.includes(source)) await q('UPDATE contacts SET sources = array_append(sources, $2) WHERE id = $1', [existing.id, source]);
       return { contact: existing, isNew: false };
@@ -90,36 +93,54 @@ export async function addContact(employerId, c, source) {
   const full = c.fullName || [c.firstName, c.lastName].filter(Boolean).join(' ');
   const contact = await one(`INSERT INTO contacts (employer_id, first_name, last_name, full_name, title, email, email_confidence, phone, sources, lusha_id)
                              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,ARRAY[$9]::text[],$10) RETURNING *`,
-  [employerId, c.firstName || full.split(' ')[0] || null, c.lastName || full.split(' ').slice(1).join(' ') || null, full || null,
+  // A forwarding address has no person's name: never guess one from the placeholder label.
+  [employerId, isRelay(email) ? (c.firstName || null) : (c.firstName || full.split(' ')[0] || null),
+    isRelay(email) ? (c.lastName || null) : (c.lastName || full.split(' ').slice(1).join(' ') || null), full || null,
     c.title || null, email, c.emailConfidence || null, c.phone || null, source, c.lushaId || null]);
   return { contact, isNew: true };
 }
 
-/** Ingest one normalized PracticeMatch listing. */
+/** Ingest one normalized PracticeMatch listing.
+ *  A posting contact already on file means the same client: the job is consolidated under that contact's employer,
+ *  so a recruiter with many open jobs is one prospect and gets one sequence. */
 export async function ingestListing(row) {
-  const domain = row.domain || (row.contactEmail && !isFreeMail(row.contactEmail) ? emailDomain(row.contactEmail) : null);
-  const { employer, isNew } = await upsertEmployer({ name: row.employer, domain, city: row.city, state: row.state, source: 'PM' });
+  const email = (row.contactEmail || '').trim().toLowerCase() || null;
+  let employer = null; let isNew = false;
+  if (email && !isRelay(email)) {
+    // Same recruiter address = same client. (PracticeMatch forwarding addresses are shared, so not those.)
+    const known = await one('SELECT e.* FROM contacts c JOIN employers e ON e.id = c.employer_id WHERE lower(c.email) = $1 ORDER BY c.id LIMIT 1', [email]);
+    if (known) employer = known;
+  }
+  if (!employer) {
+    const domain = row.domain || (email && !isRelay(email) && !isFreeMail(email) ? emailDomain(email) : null);
+    const r = await upsertEmployer({ name: row.employer, domain, city: row.city, state: row.state, source: 'PM' });
+    employer = r.employer; isNew = r.isNew;
+    // A PracticeMatch in-house posting is itself evidence of a provider employer.
+    if (employer.type === T.UNKNOWN) employer = await one(`UPDATE employers SET type = $2 WHERE id = $1 RETURNING *`, [employer.id, T.PG]);
+  } else if (!employer.sources.includes('PM')) {
+    await q(`UPDATE employers SET sources = array_append(sources, 'PM') WHERE id = $1`, [employer.id]);
+  }
   const existing = await one(`SELECT id FROM openings WHERE source = 'PM' AND external_id = $1`, [row.listingId]);
   let newOpening = false;
   if (existing) {
     await q('UPDATE openings SET last_seen = now(), active = true WHERE id = $1', [existing.id]);
   } else {
-    const same = await one(`SELECT id FROM openings WHERE employer_id = $1 AND active AND lower(coalesce(specialty,'')) = lower($2) AND lower(coalesce(role,'')) = lower($3)`, [employer.id, row.specialty || '', row.role || '']);
-    if (same) {
-      await q('UPDATE openings SET last_seen = now() WHERE id = $1', [same.id]);
-    } else {
-      await q(`INSERT INTO openings (employer_id, source, external_id, role, specialty, city, state, url, restriction, posted_at, raw)
-               VALUES ($1,'PM',$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
-      [employer.id, row.listingId, row.role, row.specialty, row.city || null, row.state || null, row.url || null, row.restriction || null, row.postedAt, JSON.stringify(row)]);
-      await q('UPDATE employers SET last_signal = now() WHERE id = $1', [employer.id]);
-      newOpening = true;
-      if (!isNew) await logEvent(employer.id, `Additional opening: ${row.specialty} ${row.role}. Consolidated into the employer; no extra outreach.`);
-    }
+    await q(`INSERT INTO openings (employer_id, source, external_id, role, specialty, city, state, url, restriction, posted_at, raw, pm_code, contact_email, title)
+             VALUES ($1,'PM',$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)`,
+    [employer.id, row.listingId, row.role, row.specialty, row.city || null, row.state || null, row.url || null, row.restriction || null, row.postedAt,
+      JSON.stringify({ ...row, description: (row.description || '').slice(0, 4000) }), row.pmCode || null, email, row.title || null]);
+    await q('UPDATE employers SET last_signal = now() WHERE id = $1', [employer.id]);
+    newOpening = true;
+    if (!isNew) await logEvent(employer.id, `Another opening: ${row.specialty} ${row.role}${row.city ? ` in ${row.city}` : ''}. Same client, no extra outreach.`);
   }
   let newContact = false;
-  if (row.contactEmail || row.contactName) {
+  if (email || row.contactName) {
     const [first, ...rest] = (row.contactName || '').split(/\s+/);
-    const r = await addContact(employer.id, { firstName: first, lastName: rest.join(' '), fullName: row.contactName, title: row.contactTitle || 'Listing contact', email: row.contactEmail || null, phone: row.contactPhone || null }, 'PM');
+    const r = await addContact(employer.id, {
+      firstName: first, lastName: rest.join(' '),
+      fullName: row.contactName || (isRelay(email) ? `${employer.name} recruiting (via PracticeMatch)` : ''),
+      title: row.contactTitle || 'Listing contact', email, phone: row.contactPhone || null,
+    }, 'PM');
     newContact = r.isNew;
   }
   return { employerId: employer.id, isNew, newOpening, newContact };

@@ -2,7 +2,7 @@
 // are recomputed here and stored on the row, so the dashboard just reads them.
 import { q, one } from '../db.js';
 import { getSettings, EMPLOYER_TYPES as T } from '../settings.js';
-import { normName, normDomain, lines, emailDomain } from '../util.js';
+import { normName, normDomain, lines, emailDomain, isFreeMail } from '../util.js';
 import { classifyEmployer } from '../integrations/ai.js';
 import { cfg } from '../config.js';
 
@@ -100,6 +100,7 @@ export function titleRank(title, ctx, departments = []) {
 
 export function isUsable(c, ctx) {
   if (!c.email || c.bad) return false;
+  if (/@practicematch\.com$/i.test(c.email) && ctx.settings.practicematch?.relayOutreach === false) return false;
   if (ctx.suppressedEmails.has(c.email.toLowerCase()) || ctx.suppressedDomains.has(emailDomain(c.email))) return false;
   // A contact published on the listing is the listing's own recruiter, so it is usable even with a vague title.
   return titleRank(c.title, ctx) < 99 || c.sources.includes('PM') || c.sources.includes('Referral');
@@ -219,7 +220,7 @@ export function evaluate(emp, openings, contacts, seqs, ctx) {
       score = Math.max(0, Math.min(100, score));
       if (reasons.length) status = 'review';
       else if (!chosen) { status = 'needs_contact'; reasons = [emp.domain ? 'No usable recruiting or HR contact yet' : 'No contact yet, and the employer website is unknown']; }
-      else if (!emp.domain) { status = 'review'; reasons = ['Employer domain not confirmed (contact uses a personal email)']; }
+      else if (!emp.domain && isFreeMail(chosen.email)) { status = 'review'; reasons = ['Employer domain not confirmed (contact uses a personal email)']; }
       else status = 'qualified';
     }
   }

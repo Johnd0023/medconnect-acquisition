@@ -18,6 +18,9 @@ export const emailDomain = (e) => normDomain((e || '').split('@')[1]);
 const FREE_MAIL = new Set(['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com', 'icloud.com', 'live.com', 'msn.com', 'comcast.net', 'protonmail.com']);
 export const isFreeMail = (e) => FREE_MAIL.has(emailDomain(e));
 
+/** PracticeMatch forwarding addresses are shared by many clients; the client is identified by the Opportunity code. */
+export const isRelay = (e) => /@practicematch\.com$/i.test(e || '');
+
 export const lines = (s) => (s || '').split('\n').map((x) => x.trim()).filter(Boolean);
 
 // ---------- AES-256-GCM for tokens at rest ----------

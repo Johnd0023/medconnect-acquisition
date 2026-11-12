@@ -6,7 +6,7 @@ import { getSettings } from '../settings.js';
 import { loadContext, requalify } from './qualify.js';
 import { compose } from './compose.js';
 import * as outlook from '../integrations/outlook.js';
-import { zoned, hhmmToMin, startOfBusinessDay, addSendDays, atLocalTime, randInt } from '../util.js';
+import { zoned, hhmmToMin, startOfBusinessDay, addSendDays, atLocalTime, randInt, isRelay } from '../util.js';
 
 export async function enroll(employerId, { by = 'owner' } = {}) {
   const ctx = await loadContext();
@@ -14,8 +14,13 @@ export async function enroll(employerId, { by = 'owner' } = {}) {
   if (!r) throw new Error('Employer not found');
   if (r.bucket !== 'ready') throw new Error(`Not ready for outreach: ${r.reasons.join('; ') || r.status}`);
   const c = r.chosen;
-  const busy = await one(`SELECT 1 FROM sequences WHERE contact_id = $1 AND status = 'active'`, [c.id]);
-  if (busy) throw new Error(`${c.full_name} is already in another active sequence`);
+  // One sequence per contact. A PracticeMatch forwarding address counts once per client, a real address once overall.
+  const already = isRelay(c.email)
+    ? await one(`SELECT s.status, e.name FROM sequences s JOIN employers e ON e.id = s.employer_id WHERE s.contact_id = $1 ORDER BY s.started_at DESC LIMIT 1`, [c.id])
+    : await one(`SELECT s.status, e.name FROM sequences s JOIN contacts ct ON ct.id = s.contact_id JOIN employers e ON e.id = s.employer_id
+                 WHERE lower(ct.email) = lower($1) ORDER BY s.started_at DESC LIMIT 1`, [c.email]);
+  const emp = await one('SELECT decision FROM employers WHERE id = $1', [employerId]);
+  if (already && emp.decision !== 'recontact') throw new Error(`${c.email} was already contacted (${already.name}). Each contact gets one sequence; follow-ups are part of it.`);
   await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status) VALUES ($1, $2, 0, now(), 'active')`, [employerId, c.id]);
   await q(`UPDATE employers SET decision = 'approved' WHERE id = $1`, [employerId]);
   await logEvent(employerId, `Enrolled in outreach (${by}) → ${c.full_name}${c.title ? `, ${c.title}` : ''}`);

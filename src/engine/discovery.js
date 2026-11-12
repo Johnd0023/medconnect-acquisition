@@ -163,20 +163,31 @@ export async function lushaFillContacts(settings, ctx, sum, onlyIds = null) {
   }
 }
 
+/** Scan PracticeMatch for today's postings and add them. Used by the morning discovery and the extra scan times. */
+export async function runPracticeMatchScan({ requalifyAfter = true, autoEnroll = false } = {}) {
+  const settings = await getSettings();
+  const logs = [];
+  const rows = await pm.fetchApprovedListings(settings, (m) => { logs.push(m); console.log('[practicematch]', m); });
+  const r = rows.length ? await importListings(rows, 'scan') : { listings: 0, newEmployers: 0, newOpenings: 0, newContacts: 0, merged: 0 };
+  if (requalifyAfter) await requalifyAll();
+  let enrolled = 0;
+  if (autoEnroll && !settings.supervised && settings.autoEnroll && !settings.paused) {
+    for (const { id } of await q(`SELECT id FROM employers WHERE bucket = 'ready' ORDER BY score DESC NULLS LAST`)) { try { await enroll(id, { by: 'auto' }); enrolled++; } catch { /* skip */ } }
+  }
+  return { ...r, enrolled, log: logs.slice(-6) };
+}
+
 export async function runDiscovery({ trigger = 'schedule' } = {}) {
   const settings = await getSettings();
   const sum = { trigger, pmListings: 0, newEmployers: 0, newOpenings: 0, newContacts: 0, merged: 0, lushaPreviews: 0, lushaRevealed: 0, skippedProtected: 0, skippedExcluded: 0, skippedNotTarget: 0, enrolled: 0, notes: [], touched: new Set() };
   let ctx = await loadContext();
 
-  // 1. PracticeMatch automated monitor (returns nothing until configured; imports run separately)
+  // 1. PracticeMatch daily scan
   try {
-    const rows = await pm.fetchApprovedListings(settings);
-    if (rows.length) {
-      const r = await importListings(rows, 'monitor');
-      Object.assign(sum, { pmListings: r.listings, newOpenings: r.newOpenings, merged: r.merged });
-      sum.newEmployers += r.newEmployers; sum.newContacts += r.newContacts;
-    }
-  } catch (e) { sum.notes.push(`PracticeMatch monitor failed: ${e.message}`); }
+    const r = await runPracticeMatchScan({ requalifyAfter: false });
+    Object.assign(sum, { pmListings: r.listings, newOpenings: r.newOpenings, merged: r.merged });
+    sum.newEmployers += r.newEmployers; sum.newContacts += r.newContacts;
+  } catch (e) { sum.notes.push(`PracticeMatch scan failed: ${e.message}`); }
 
   // 2-3. Lusha
   if (cfg.lushaApiKey) {

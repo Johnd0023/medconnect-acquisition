@@ -84,9 +84,23 @@ export const DEFAULT_SETTINGS = {
   followupGap1Days: 3,         // send days after the initial email
   followupGap2Days: 4,         // send days after follow-up 1
 
+  // --- PracticeMatch daily scan ---
+  practicematch: {
+    enabled: true,
+    boards: ['physicians', 'advanced-practitioners'], // physician and advanced-practice (NP, PA, CRNA) job boards
+    inHouseOnly: true,          // skip postings by staffing agencies
+    scanTimes: ['06:00', '18:00'], // jobs posted "today", read twice a day; new job IDs only
+    jobAge: 1,                  // 1 = today, 7, 30
+    firstRunJobAge: 1,          // the very first scan looks back this many days
+    maxPagesPerBoard: 60,
+    maxDetailsPerRun: 1500,
+    delayMs: 1500,              // pause between page requests
+    relayOutreach: true,        // email the posting's "Click to email" address (PracticeMatch forwarding addresses included)
+  },
+
   // --- Lusha ---
   lusha: {
-    prospectingEnabled: true,
+    prospectingEnabled: false,   // nationwide Lusha prospecting (off: PracticeMatch first)
     pagesPerDay: 1,
     pageSize: 25,
     maxContactsPerCompany: 2,
@@ -109,7 +123,7 @@ export const DEFAULT_SETTINGS = {
   },
 
   // --- targeting ---
-  specialties: ['Hospitalist', 'Emergency Medicine', 'Family Medicine', 'Internal Medicine', 'Psychiatry', 'Anesthesiology', 'OB/GYN', 'Urgent Care', 'Cardiology', 'Pediatrics', 'Radiology', 'Neurology', 'Gastroenterology', 'Oncology', 'General Surgery', 'Orthopedic Surgery', 'Pulmonology', 'Nephrology', 'Urology', 'Dermatology'],
+  specialties: ['Hospitalist', 'Emergency Medicine', 'Family Medicine', 'Internal Medicine', 'Primary Care', 'Pediatrics', 'Neonatology', 'OB/GYN', 'Obstetrics', 'Gynecology', 'Maternal-Fetal Medicine', 'Urgent Care', 'Psychiatry', 'Child Psychiatry', 'Addiction Medicine', 'Behavioral Health', 'Anesthesiology', 'CRNA', 'Pain Management', 'Critical Care', 'Intensivist', 'Pulmonology', 'Pulmonary', 'Cardiology', 'Electrophysiology', 'Gastroenterology', 'Hepatology', 'Nephrology', 'Endocrinology', 'Rheumatology', 'Infectious Disease', 'Hematology', 'Oncology', 'Radiation Oncology', 'Neurology', 'Neurosurgery', 'Neurological Surgery', 'General Surgery', 'Surgery', 'Orthopedic', 'Orthopaedic', 'Sports Medicine', 'Spine', 'Cardiothoracic Surgery', 'Vascular Surgery', 'Plastic Surgery', 'Trauma Surgery', 'Bariatric Surgery', 'Colorectal Surgery', 'Colon & Rectal Surgery', 'Surgical Oncology', 'Urology', 'Otolaryngology', 'ENT', 'Ophthalmology', 'Dermatology', 'Allergy', 'Immunology', 'Physical Medicine', 'PM&R', 'Radiology', 'Interventional Radiology', 'Pathology', 'Geriatric', 'Palliative', 'Hospice', 'Wound Care', 'Occupational Medicine', 'Telemedicine', 'Sleep Medicine', "Women's Health", 'Acute Care', 'Adult Health', 'General Practice', 'Academic', 'Administration'],
   types: [EMPLOYER_TYPES.HS, EMPLOYER_TYPES.PG, EMPLOYER_TYPES.UC, EMPLOYER_TYPES.CHC, EMPLOYER_TYPES.BH],
   excludeKeywords: 'staffing\nlocum\nlocums\nrecruiting\nrecruitment firm\nsearch firm\nsearch partners\nplacement\ntalent solutions\nshifts\nworkforce solutions',
   // Large hospital and physician-group operators whose names don't say "hospital" (always treated as care providers).

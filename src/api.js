@@ -5,7 +5,7 @@ import { getSettings, saveSettings, DEFAULT_TEMPLATES, EMPLOYER_TYPES } from './
 import { loadContext, requalify, requalifyAll, rankContacts, isUsable, protectionMatch, prospectDecision } from './engine/qualify.js';
 import { compose } from './engine/compose.js';
 import { enroll, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
-import { runDiscovery, importListings, lushaFillContacts, resolveIndustries } from './engine/discovery.js';
+import { runDiscovery, importListings, lushaFillContacts, resolveIndustries, runPracticeMatchScan } from './engine/discovery.js';
 import { pollReplies, referralFrom } from './engine/replies.js';
 import { addContact, inferType } from './engine/ingest.js';
 import { runJob } from './scheduler.js';
@@ -43,6 +43,7 @@ export const routes = {
     const counts = Object.fromEntries((await q('SELECT bucket, count(*) AS n FROM employers GROUP BY bucket')).map((r) => [r.bucket, Number(r.n)]));
     const fresh = await q(`SELECT * FROM employers WHERE (first_seen >= $1 OR last_signal >= $1) AND bucket <> 'suppressed' ORDER BY score DESC NULLS LAST LIMIT 40`, [today()]);
     const lastRun = await one(`SELECT * FROM job_runs WHERE job = 'discovery' ORDER BY started_at DESC LIMIT 1`);
+    const lastScan = await one(`SELECT * FROM job_runs WHERE job = 'pm-scan' ORDER BY started_at DESC LIMIT 1`);
     const st = await sendState();
     const due = Number((await one(`SELECT count(*) AS n FROM sequences WHERE status = 'active' AND next_at <= now()`)).n);
     const totals = await one(`SELECT (SELECT count(*) FROM employers) AS employers, (SELECT count(*) FROM contacts) AS contacts,
@@ -50,7 +51,7 @@ export const routes = {
       (SELECT count(*) FROM replies WHERE NOT handled) AS unhandled, (SELECT count(*) FROM tasks WHERE NOT done) AS tasks`);
     return {
       now: new Date(), timezone: cfg.timezone, counts, fresh: await Promise.all(fresh.map(async (e) => employerRow(e, ctxAll))),
-      lastRun, send: { ...st, settings: undefined, due }, totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, Number(v)])),
+      lastRun, lastScan, send: { ...st, settings: undefined, due }, totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, Number(v)])),
       credits: await lusha.creditsUsed(), budget: s.lusha.monthlyCreditBudget,
       mode: { supervised: s.supervised, paused: s.paused, dryRun: cfg.dryRun },
     };
@@ -302,6 +303,14 @@ export const routes = {
     const key = `manual-${zoned().ymd}-${Date.now()}`;
     return { ok: true, summary: await runJob('discovery', key, () => runDiscovery({ trigger: 'manual' })) };
   },
+  'POST /api/jobs/practicematch': async () => {
+    const running = await one(`SELECT 1 FROM job_runs WHERE job = 'pm-scan' AND status = 'running' AND started_at > now() - interval '2 hours'`);
+    if (running) return { ok: true, message: 'A PracticeMatch scan is already running. Results appear on Today when it finishes.' };
+    const key = `manual-${zoned().ymd}-${Date.now()}`;
+    runJob('pm-scan', key, () => runPracticeMatchScan({ autoEnroll: true })).catch((e) => console.error('[pm-scan]', e.message));
+    return { ok: true, message: 'PracticeMatch scan started. It reads today\'s postings at a gentle pace (up to ~30 minutes the first time). New clients appear on Today as it goes.' };
+  },
+  'GET /api/jobs/practicematch': async () => ({ runs: await q(`SELECT * FROM job_runs WHERE job = 'pm-scan' ORDER BY started_at DESC LIMIT 10`) }),
   'POST /api/jobs/replies': async () => ({ ok: true, summary: await pollReplies() }),
   'GET /api/jobs': async () => ({ runs: await q(`SELECT * FROM job_runs WHERE job = 'discovery' ORDER BY started_at DESC LIMIT 20`) }),
 
