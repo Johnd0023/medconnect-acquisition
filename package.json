@@ -1,0 +1,19 @@
+{
+  "name": "medconnect-acquisition",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MedConnect Staffing Client Acquisition Platform: PracticeMatch + Lusha discovery, qualification, Outlook outreach.",
+  "type": "module",
+  "engines": { "node": ">=20.10" },
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node scripts/migrate.js",
+    "gen:secrets": "node scripts/gen-secrets.js",
+    "lusha:check": "node scripts/lusha-check.js",
+    "discovery:run": "node scripts/run-discovery.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

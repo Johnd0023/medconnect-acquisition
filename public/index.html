@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MedConnect Client Acquisition</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Layout: left rail of the 7 dashboard areas, a working pane, and an employer profile drawer on the right. */
+  --bg:#eef2f4; --surface:#ffffff; --sunk:#f6f8f9; --ink:#14212b; --muted:#566673; --line:#d9e0e5;
+  --accent:#1d5d8a; --accent-ink:#ffffff; --accent-soft:#e1edf6;
+  --good:#1b7a4c; --good-soft:#dff2e8; --warn:#8f5c00; --warn-soft:#fbefd6; --bad:#b0362d; --bad-soft:#f9e3e1;
+  --pm:#6a4c9c; --pm-soft:#ece6f6; --lu:#0b7c83; --lu-soft:#dcf1f2;
+  --display:"IBM Plex Sans Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f161c; --surface:#16212a; --sunk:#121b22; --ink:#e3eaef; --muted:#93a4b1; --line:#283844;
+    --accent:#6fb0e0; --accent-ink:#0c1620; --accent-soft:#1b3346;
+    --good:#5fcf95; --good-soft:#163427; --warn:#e8b45a; --warn-soft:#3a2c12; --bad:#f08a80; --bad-soft:#3d1c1a;
+    --pm:#b9a0e6; --pm-soft:#2b2340; --lu:#5fd0d6; --lu-soft:#123336;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f161c; --surface:#16212a; --sunk:#121b22; --ink:#e3eaef; --muted:#93a4b1; --line:#283844;
+  --accent:#6fb0e0; --accent-ink:#0c1620; --accent-soft:#1b3346;
+  --good:#5fcf95; --good-soft:#163427; --warn:#e8b45a; --warn-soft:#3a2c12; --bad:#f08a80; --bad-soft:#3d1c1a;
+  --pm:#b9a0e6; --pm-soft:#2b2340; --lu:#5fd0d6; --lu-soft:#123336;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--body);}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3{font-family:var(--display);font-weight:600;margin:0;text-wrap:balance;letter-spacing:.005em}
+h1{font-size:24px} h2{font-size:18px} h3{font-size:15px}
+.num,td.n,.mono{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:12.5px}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{display:grid;grid-template-columns:216px 1fr;min-height:100%}
+.rail{background:var(--surface);border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:18px;position:sticky;top:0;height:100vh}
+.brand{display:flex;flex-direction:column;gap:2px;padding:0 8px}
+.brand b{font-family:var(--display);font-size:17px;letter-spacing:.02em}
+.brand span{color:var(--muted);font-size:12px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;text-decoration:none;color:var(--ink);font-weight:500}
+.nav a:hover{background:var(--sunk)}
+.nav a[aria-current="page"]{background:var(--accent-soft);color:var(--accent)}
+.nav .count{font-size:12px;font-variant-numeric:tabular-nums;background:var(--sunk);color:var(--muted);border-radius:10px;padding:0 7px;min-width:22px;text-align:center}
+.nav a[aria-current="page"] .count{background:var(--surface)}
+.clock{margin-top:auto;border-top:1px solid var(--line);padding:12px 8px 0;display:flex;flex-direction:column;gap:8px;font-size:12.5px;color:var(--muted)}
+.clock strong{color:var(--ink);font-size:14px}
+
+main{padding:22px 28px 60px;display:flex;flex-direction:column;gap:20px;min-width:0}
+.banner{display:flex;gap:10px;align-items:flex-start;background:var(--warn-soft);color:var(--ink);border:1px solid color-mix(in srgb,var(--warn) 30%,transparent);border-radius:8px;padding:9px 12px;font-size:13px}
+.banner b{color:var(--warn)}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.head p{margin:4px 0 0;color:var(--muted);max-width:70ch}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:7px 12px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.danger{color:var(--bad)}
+.btn.sm{padding:4px 9px;font-size:12.5px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.card > .ch{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.card > .cb{padding:14px 16px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.kpi .v{font-family:var(--display);font-size:28px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+.kpi .l{color:var(--muted);font-size:12.5px}
+.kpi .s{font-size:12px;color:var(--muted)}
+
+.pipe{display:grid;grid-template-columns:repeat(6,1fr);gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
+.pipe div{padding:10px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:2px}
+.pipe div:last-child{border-right:0}
+.pipe small{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}
+.pipe b{font-family:var(--display);font-size:20px;font-variant-numeric:tabular-nums}
+.pipe span{font-size:12px;color:var(--muted)}
+
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-weight:500;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+tr.click{cursor:pointer}
+tr.click:hover td{background:var(--sunk)}
+td .sub{color:var(--muted);font-size:12.5px}
+.empty{padding:22px 16px;color:var(--muted);text-align:center}
+
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;border-radius:999px;padding:1px 9px;white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.p-good{background:var(--good-soft);color:var(--good)}
+.p-warn{background:var(--warn-soft);color:var(--warn)}
+.p-bad{background:var(--bad-soft);color:var(--bad)}
+.p-info{background:var(--accent-soft);color:var(--accent)}
+.p-mute{background:var(--sunk);color:var(--muted);border:1px solid var(--line)}
+.src{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;border-radius:4px;padding:0 6px;margin-right:3px}
+.src.pm{background:var(--pm-soft);color:var(--pm)}
+.src.lu{background:var(--lu-soft);color:var(--lu)}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 12px;cursor:pointer;font-weight:500;font-size:13px}
+.tab[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.tab .c{font-variant-numeric:tabular-nums;opacity:.7;margin-left:4px}
+.reasons{margin:4px 0 0;padding:0;list-style:none;font-size:12.5px;color:var(--muted)}
+.reasons li::before{content:"· "}
+
+.runlog{display:flex;flex-direction:column;gap:8px;font-size:13px}
+.runlog .row{display:grid;grid-template-columns:90px 1fr;gap:10px}
+.runlog .t{color:var(--muted);font-family:var(--mono);font-size:12px;padding-top:1px}
+
+/* drawer */
+.scrim{position:fixed;inset:0;background:rgba(10,20,28,.35);z-index:10}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(640px,100%);background:var(--surface);border-left:1px solid var(--line);z-index:11;overflow-y:auto;display:flex;flex-direction:column}
+.drawer .dh{padding:18px 20px 14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;position:sticky;top:0;background:var(--surface);z-index:1}
+.drawer .ds{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.meta{display:flex;flex-wrap:wrap;gap:6px 14px;color:var(--muted);font-size:13px}
+.contact{display:grid;grid-template-columns:20px 1fr auto;gap:8px;align-items:start;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
+.contact.sel{border-color:var(--accent);background:var(--accent-soft)}
+.email{border:1px solid var(--line);border-radius:8px;background:var(--sunk);padding:12px 14px;font-size:13.5px;white-space:pre-wrap}
+.email .subj{font-weight:600;margin-bottom:8px;white-space:normal}
+.timeline{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13px}
+.timeline li{display:grid;grid-template-columns:86px 1fr;gap:8px}
+.timeline .t{color:var(--muted);font-family:var(--mono);font-size:12px}
+.x{border:0;background:none;font-size:22px;line-height:1;cursor:pointer;color:var(--muted);padding:0 4px}
+
+/* forms */
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-weight:500;font-size:13px}
+.field .hint{color:var(--muted);font-size:12px}
+input[type=text],input[type=number],textarea,select{border:1px solid var(--line);border-radius:6px;padding:7px 9px;background:var(--surface);width:100%}
+textarea{min-height:110px;resize:vertical;font-family:var(--mono);font-size:12.5px;line-height:1.5}
+.checks{display:flex;flex-wrap:wrap;gap:6px}
+.checks label{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:6px;padding:4px 9px;font-size:13px;cursor:pointer;background:var(--surface)}
+.switch{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:8px}
+.switch input{margin-top:3px}
+.switch small{display:block;color:var(--muted);font-size:12px}
+
+.chart svg{width:100%;height:auto;display:block}
+.legend{display:flex;gap:14px;font-size:12.5px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:9px 14px;border-radius:8px;font-size:13.5px;z-index:20;max-width:90%}
+
+@media (max-width:860px){
+  .app{grid-template-columns:1fr}
+  .rail{position:static;height:auto;flex-direction:column}
+  .nav{flex-direction:row;flex-wrap:wrap}
+  .clock{margin-top:0}
+  main{padding:16px}
+  .pipe{grid-template-columns:repeat(3,1fr)}
+  .pipe div:nth-child(3){border-right:0}
+  .pipe div:nth-child(-n+3){border-bottom:1px solid var(--line)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+.clock .btn{display:block}
+details summary{list-style:revert}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><b>MEDCONNECT</b><span>Client Acquisition Platform</span></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="clock" id="clock"></div>
+  </aside>
+  <main id="main"><div class="empty">Loading…</div></main>
+</div>
+<div id="drawerRoot"></div>
+<div id="toastRoot"></div>
+
+<script>
+"use strict";
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const TZ = "America/New_York";
+const fmtDay = (d) => d ? new Date(d).toLocaleDateString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" }) : "—";
+const fmtShort = (d) => d ? new Date(d).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" }) : "—";
+const fmtTime = (d) => d ? new Date(d).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
+const VIEWS = [["today", "Today's Opportunities"], ["queue", "Prospect Queue"], ["outreach", "Outreach Activity"], ["responses", "Response Queue"], ["performance", "Performance"], ["settings", "Settings"]];
+const CAT_LABEL = { interested: "Interested", not_now: "Not right now", referral: "Referral", wrong_contact: "Wrong contact", opt_out: "Opt-out", ooo: "Out of office", bounce: "Bounced", other: "Other reply" };
+const CAT_PILL = { interested: "p-good", referral: "p-info", not_now: "p-mute", wrong_contact: "p-warn", opt_out: "p-bad", ooo: "p-mute", bounce: "p-bad", other: "p-mute" };
+let ui = { queueTab: "review", drawer: null, tpl: "initial_opening", overview: null, settingsData: null };
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { method: opts.method || "GET", headers: opts.body ? { "Content-Type": "application/json" } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined, credentials: "same-origin" });
+  const json = await res.json().catch(() => ({}));
+  if (res.status === 401) { location.href = "/login"; throw new Error("Signed out"); }
+  if (!res.ok) throw new Error(json.error || res.statusText);
+  return json;
+}
+function toast(t, bad) { const r = document.getElementById("toastRoot"); r.innerHTML = `<div class="toast" role="status"${bad ? ' style="background:var(--bad)"' : ""}>${esc(t)}</div>`; clearTimeout(toast.t); toast.t = setTimeout(() => (r.innerHTML = ""), 4200); }
+function view() { const h = location.hash.slice(1).split("?")[0]; return VIEWS.some((v) => v[0] === h) ? h : "today"; }
+const srcChips = (s) => (s || []).map((x) => x === "PM" ? '<span class="src pm" title="PracticeMatch">PM</span>' : x === "Lusha" ? '<span class="src lu" title="Lusha">LUSHA</span>' : `<span class="src" style="background:var(--sunk);color:var(--muted)">${esc(x.toUpperCase())}</span>`).join("");
+
+function statusPill(e) {
+  const s = e.sequence;
+  if (e.bucket === "outreach" && s) {
+    if (s.replied) return '<span class="pill p-good">Replied</span>';
+    if (s.status === "active") return `<span class="pill p-info">In sequence · step ${s.step + 1}/3</span>`;
+    if (s.status === "paused") return '<span class="pill p-warn">Paused</span>';
+    if (s.status === "completed") return '<span class="pill p-mute">Sequence finished</span>';
+    return '<span class="pill p-mute">Stopped</span>';
+  }
+  if (e.bucket === "suppressed") return e.status === "protected" ? '<span class="pill p-bad">Protected client</span>' : e.status === "excluded" ? '<span class="pill p-bad">Excluded</span>' : '<span class="pill p-bad">Suppressed</span>';
+  return { ready: '<span class="pill p-good">Ready</span>', review: '<span class="pill p-warn">Review</span>', contact: '<span class="pill p-warn">Needs contact</span>' }[e.bucket] || "";
+}
+function signalCell(e) {
+  if (!e.openingCount) return '<span class="sub">No active listing · Lusha prospect</span>';
+  const o = e.openings[0];
+  return `${esc(o.specialty)} ${esc(o.role)}${e.openingCount > 1 ? ` <span class="sub">+${e.openingCount - 1} more</span>` : ""}<div class="sub">Posted ${fmtShort(o.postedAt)}</div>`;
+}
+function rowActions(e) {
+  const b = e.bucket;
+  if (b === "review") return `<div class="actions"><button class="btn sm primary" data-emp="${e.id}" data-a="approve">Approve</button><button class="btn sm" data-emp="${e.id}" data-a="suppress">Suppress</button></div>`;
+  if (b === "ready") return `<button class="btn sm primary" data-emp="${e.id}" data-a="enroll">Enroll</button>`;
+  if (b === "contact") return `<button class="btn sm" data-emp="${e.id}" data-a="enrich">Find via Lusha</button>`;
+  if (b === "suppressed" && e.decision === "suppressed") return `<button class="btn sm" data-emp="${e.id}" data-a="unsuppress">Restore</button>`;
+  if (b === "outreach" && e.sequence?.status === "active") return `<button class="btn sm" data-emp="${e.id}" data-a="pause">Pause</button>`;
+  if (b === "outreach" && e.sequence?.status === "paused") return `<button class="btn sm" data-emp="${e.id}" data-a="resume">Resume</button>`;
+  if (b === "outreach" && e.sequence && ["stopped", "completed"].includes(e.sequence.status) && !e.sequence.replied) return `<button class="btn sm" data-emp="${e.id}" data-a="recontact">Try again</button>`;
+  return "";
+}
+function modeBanner(m) {
+  if (!m) return "";
+  if (m.dryRun) return '<div class="banner"><b>Dry run</b><span>Emails are composed and logged, never sent. When the supervised review looks right, set DRY_RUN=false in Railway to go live.</span></div>';
+  if (m.paused) return '<div class="banner"><b>Paused</b><span>Automation is paused. Discovery keeps running; nothing is sent. Turn it back on in Settings.</span></div>';
+  return "";
+}
+
+/* ---------------- nav ---------------- */
+async function renderNav() {
+  const o = ui.overview;
+  const v = view();
+  const c = o?.counts || {};
+  const badge = o ? { today: o.fresh.length, queue: (c.ready || 0) + (c.review || 0) + (c.contact || 0), outreach: o.send.due, responses: o.totals.unhandled } : {};
+  document.getElementById("nav").innerHTML = VIEWS.map(([k, l]) => `<a href="#${k}"${v === k ? ' aria-current="page"' : ""}><span>${l}</span>${badge[k] !== undefined ? `<span class="count">${badge[k]}</span>` : ""}</a>`).join("");
+  if (!o) return;
+  const s = o.send;
+  document.getElementById("clock").innerHTML = `<span>${fmtTime(o.now)} ET</span>
+    <span>${o.mode.paused ? '<span class="pill p-bad">Paused</span>' : o.mode.dryRun ? '<span class="pill p-warn">Dry run</span>' : o.mode.supervised ? '<span class="pill p-warn">Supervised</span>' : '<span class="pill p-good">Automated</span>'}</span>
+    <span><strong>${s.sent}</strong> of ${s.cap} sent today</span>
+    <span>${s.canSend ? "Sending is open" : esc(s.reason)}</span>
+    <a class="btn sm" href="/logout" style="text-align:center;text-decoration:none;color:var(--ink)">Sign out</a>`;
+}
+
+/* ---------------- today ---------------- */
+async function renderToday() {
+  const o = ui.overview;
+  const c = o.counts; const run = o.lastRun; const sm = run?.summary || {};
+  const stages = [["Discover", o.totals.employers, "employers on file"], ["Extract", o.totals.contacts, "contacts captured"], ["Qualify", (c.ready || 0) + (c.review || 0) + (c.contact || 0), "awaiting a decision"], ["Protect", c.suppressed || 0, "blocked or excluded"], ["Engage", o.totals.active, "in active sequences"], ["Track", o.totals.replies, "replies to date"]];
+  return modeBanner(o.mode) + `<div class="head"><div><h1>Today's Opportunities</h1><p>${fmtDay(o.now)}. New employers and fresh hiring signals from PracticeMatch and Lusha.</p></div>
+  <div class="actions"><button class="btn" data-act="runDiscovery">Run discovery now</button><button class="btn primary" data-act="sendNow" ${o.send.due && o.send.canSend ? "" : "disabled"} title="${esc(o.send.reason || "")}">Send next email now</button></div></div>
+  <div class="pipe">${stages.map((s) => `<div><small>${s[0]}</small><b>${s[1]}</b><span>${s[2]}</span></div>`).join("")}</div>
+  <div class="kpis">
+    <div class="kpi"><span class="l">New or refreshed employers</span><span class="v">${o.fresh.length}</span><span class="s">since midnight ET</span></div>
+    <div class="kpi"><span class="l">Waiting on your review</span><span class="v">${c.review || 0}</span><span class="s">${c.contact || 0} more need a contact</span></div>
+    <div class="kpi"><span class="l">Emails due</span><span class="v">${o.send.due}</span><span class="s">${o.send.sent} sent of ${o.send.cap} today</span></div>
+    <div class="kpi"><span class="l">Replies to handle</span><span class="v">${o.totals.unhandled}</span><span class="s">${o.totals.tasks} open follow-up tasks</span></div>
+  </div>
+  <div class="grid2">
+  <section class="card"><div class="ch"><h2>New today</h2><a href="#queue">Open prospect queue</a></div>
+  ${o.fresh.length ? `<div class="tablewrap"><table><thead><tr><th>Employer</th><th>Hiring signal</th><th>Status</th></tr></thead><tbody>${o.fresh.map((e) => `<tr class="click" data-open="${e.id}"><td><b>${esc(e.name)}</b><div class="sub">${srcChips(e.sources)} ${esc(e.city || "")}${e.state ? ", " + esc(e.state) : ""}</div></td><td>${signalCell(e)}</td><td>${statusPill(e)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Nothing new yet today. Discovery runs at the scheduled time, or import a PracticeMatch export in Settings.</div>'}
+  </section>
+  <section class="card"><div class="ch"><h2>Latest discovery run</h2>${run ? `<span class="sub">${fmtTime(run.started_at)}</span>` : ""}</div><div class="cb">${run ? (run.status === "error" ? `<span class="pill p-bad">Failed</span> <span class="sub">${esc(sm.error)}</span>` : `<div class="runlog">
+    <div class="row"><span class="t"><span class="src pm">PM</span></span><span>${sm.pmListings || 0} listings from the monitor · ${sm.newOpenings || 0} new openings</span></div>
+    <div class="row"><span class="t"><span class="src lu">LUSHA</span></span><span>${sm.lushaPreviews || 0} prospects previewed · ${sm.lushaRevealed || 0} contacts revealed</span></div>
+    <div class="row"><span class="t">Match</span><span>${sm.newEmployers || 0} new employers, ${sm.merged || 0} merged into existing records</span></div>
+    <div class="row"><span class="t">Protect</span><span>${sm.skippedProtected || 0} current clients and ${sm.skippedExcluded || 0} staffing firms skipped before spending credits</span></div>
+    <div class="row"><span class="t">Enroll</span><span>${o.mode.supervised ? "Supervised launch: qualified employers wait for your review" : `${sm.enrolled || 0} enrolled automatically`}</span></div>
+    <div class="row"><span class="t">Credits</span><span>${o.credits.today} today · ${o.credits.month} of ${o.budget} this month</span></div>
+    ${(sm.notes || []).map((n) => `<div class="row"><span class="t">Note</span><span>${esc(n)}</span></div>`).join("")}
+  </div>`) : '<div class="empty">No discovery run yet.</div>'}</div></section>
+  </div>`;
+}
+
+/* ---------------- queue ---------------- */
+async function renderQueue() {
+  const search = document.getElementById("qsearch")?.value || "";
+  const d = await api(`/api/employers?bucket=${ui.queueTab}&q=${encodeURIComponent(search)}`);
+  const c = d.counts; const list = d.employers;
+  const tabs = [["review", "Review"], ["ready", "Ready"], ["contact", "Needs contact"], ["outreach", "In outreach"], ["suppressed", "Suppressed"]];
+  const bulk = ui.queueTab === "ready" && list.length ? `<button class="btn primary" data-act="bulk" data-v="enrollReady">Enroll all ${list.length}</button>`
+    : ui.queueTab === "review" && list.some((e) => e.status === "qualified" && !e.decision) ? `<button class="btn" data-act="bulk" data-v="approveClean">Approve all with no flags (${list.filter((e) => e.status === "qualified" && !e.decision).length})</button>` : "";
+  return modeBanner(ui.overview?.mode) + `<div class="head"><div><h1>Prospect Queue</h1><p>One record per employer. Several openings at the same employer are consolidated, so one decision-maker gets one sequence.</p></div><div class="actions"><input type="text" id="qsearch" placeholder="Search employers" value="${esc(search)}" style="width:200px">${bulk}</div></div>
+  <div class="tabs" role="group" aria-label="Queue">${tabs.map(([k, l]) => `<button class="tab" aria-pressed="${ui.queueTab === k}" data-tab="${k}">${l}<span class="c">${c[k] || 0}</span></button>`).join("")}</div>
+  <section class="card">${list.length ? `<div class="tablewrap"><table><thead><tr><th>Employer</th><th>Hiring signal</th><th>Contact</th><th>Status</th><th>Score</th><th></th></tr></thead><tbody>${list.map((e) => {
+    const rs = e.bucket === "outreach" ? (e.sequence?.stopReason ? [e.sequence.stopReason] : []) : e.reasons || [];
+    return `<tr class="click" data-open="${e.id}"><td><b>${esc(e.name)}</b><div class="sub">${srcChips(e.sources)} ${esc(e.type)} · ${esc(e.city || "")}${e.state ? ", " + esc(e.state) : ""}</div>${rs.length ? `<ul class="reasons">${rs.map((x) => "<li>" + esc(x) + "</li>").join("")}</ul>` : ""}</td><td>${signalCell(e)}</td><td>${e.contact ? esc(e.contact.name) + '<div class="sub">' + esc(e.contact.title || "") + "</div>" : '<span class="sub">None yet</span>'}</td><td>${statusPill(e)}</td><td class="n">${e.score ?? "—"}</td><td>${rowActions(e)}</td></tr>`;
+  }).join("")}</tbody></table></div>` : '<div class="empty">No employers in this list.</div>'}</section>`;
+}
+
+/* ---------------- outreach ---------------- */
+async function renderOutreach() {
+  const d = await api("/api/outreach");
+  const s = d.send;
+  return modeBanner(ui.overview?.mode) + `<div class="head"><div><h1>Outreach Activity</h1><p>Three emails per sequence. Follow-ups reply in the same Outlook thread. A reply, opt-out, bounce or protection match stops the sequence before the next send.</p></div>
+  <div class="actions"><span class="sub">${s.sent} / ${s.cap} today · ${s.canSend ? "sending open" : esc(s.reason)}</span><button class="btn primary" data-act="sendNow" ${d.due.length && s.canSend ? "" : "disabled"}>Send next email now</button></div></div>
+  <section class="card"><div class="ch"><h2>Due now · ${d.due.length}</h2><span class="sub">Sent one at a time, spaced ${ui.settingsData ? ui.settingsData.settings.minGapSeconds + "–" + ui.settingsData.settings.maxGapSeconds + " seconds" : "randomly"}, inside the send window</span></div>${d.due.length ? `<div class="tablewrap"><table><thead><tr><th>Employer</th><th>To</th><th>Step</th></tr></thead><tbody>${d.due.map((x) => `<tr class="click" data-open="${x.employer_id}"><td><b>${esc(x.name)}</b></td><td>${esc(x.full_name)}<div class="sub mono">${esc(x.email)}</div></td><td>${x.step === 0 ? "Initial" : "Follow-up " + x.step}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Nothing due right now.</div>'}</section>
+  <div class="grid2">
+  <section class="card"><div class="ch"><h2>Scheduled</h2><span class="sub">${d.upcoming.length}</span></div>${d.upcoming.length ? `<div class="tablewrap"><table><tbody>${d.upcoming.map((x) => `<tr class="click" data-open="${x.employer_id}"><td><b>${esc(x.name)}</b><div class="sub">${esc(x.full_name)}</div></td><td>${x.step === 0 ? "Initial" : "Follow-up " + x.step}</td><td class="n">${fmtTime(x.next_at)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">No future sends scheduled.</div>'}</section>
+  <section class="card"><div class="ch"><h2>Stopped, paused and finished</h2><span class="sub">${d.stopped.length}</span></div>${d.stopped.length ? `<div class="tablewrap"><table><tbody>${d.stopped.map((x) => `<tr class="click" data-open="${x.employer_id}"><td><b>${esc(x.name)}</b><div class="sub">${esc(x.stop_reason || "")}</div></td><td><span class="pill ${x.status === "paused" ? "p-warn" : "p-mute"}">${esc(x.status)}</span></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">None yet.</div>'}</section>
+  </div>
+  <section class="card"><div class="ch"><h2>Sent log</h2><span class="sub">Latest ${d.log.length}</span></div>${d.log.length ? `<div class="tablewrap"><table><thead><tr><th>When</th><th>Employer</th><th>To</th><th>Subject</th><th></th></tr></thead><tbody>${d.log.map((m) => `<tr class="click" data-open="${m.employer_id}"><td class="n">${fmtTime(m.sent_at)}</td><td>${esc(m.name)}</td><td class="mono">${esc(m.to_email)}</td><td>${esc(m.subject)}</td><td>${m.status === "sent" ? '<span class="pill p-good">Sent</span>' : m.status === "dry_run" ? '<span class="pill p-warn">Dry run</span>' : `<span class="pill p-bad" title="${esc(m.error)}">Failed</span>`}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Nothing sent yet.</div>'}</section>`;
+}
+
+/* ---------------- responses ---------------- */
+async function renderResponses() {
+  const d = await api("/api/replies");
+  const open = d.replies.filter((r) => !r.handled); const done = d.replies.filter((r) => r.handled);
+  const card = (r) => `<div class="card"><div class="cb" style="display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div><b>${esc(r.contact_name || r.from_email)}</b>${r.contact_title ? " · " + esc(r.contact_title) : ""}<div class="sub"><a href="#responses" data-open="${r.employer_id}">${esc(r.employer_name)}</a> · ${fmtTime(r.received_at)}</div></div><span class="pill ${CAT_PILL[r.category]}">${CAT_LABEL[r.category]}</span></div>
+    <div class="email"><div class="subj">${esc(r.subject)}</div>${esc((r.body_preview || "").slice(0, 900))}</div>
+    <div class="actions">${r.category === "interested" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="meeting">Mark meeting booked</button>` : ""}${r.category === "referral" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="useReferral">Add referral and enroll</button>` : ""}${r.category === "wrong_contact" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="nextContact">Find another contact</button>` : ""}${r.category === "ooo" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="resumeOoo">Resume in 7 days</button>` : ""}<button class="btn sm" data-rep="${r.id}" data-a="task">Add follow-up task</button><button class="btn sm" data-rep="${r.id}" data-a="handled">Mark handled</button></div>
+  </div></div>`;
+  return `<div class="head"><div><h1>Response Queue</h1><p>The inbox is checked every few minutes. Replies stop the sequence, opt-outs and bounces go to the suppression list, and interested replies create a call task.</p></div><div class="actions"><button class="btn" data-act="pollReplies">Check inbox now</button></div></div>
+  <div class="grid2"><section style="display:flex;flex-direction:column;gap:10px"><h2>Needs you · ${open.length}</h2>${open.length ? open.map(card).join("") : '<div class="card empty">You\'re caught up.</div>'}</section>
+  <section class="card" style="align-self:start"><div class="ch"><h2>Owner tasks</h2><span class="sub">${d.tasks.length} open</span></div>${d.tasks.length ? `<div class="tablewrap"><table><tbody>${d.tasks.map((t) => `<tr><td><label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" data-task="${t.id}" id="task-${t.id}"><span>${esc(t.text)}<div class="sub">${esc(t.employer_name || "")} · due ${esc(t.due_date ? fmtShort(t.due_date + "T12:00:00Z") : "—")}</div></span></label></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">No open tasks.</div>'}</section></div>
+  ${done.length ? `<section class="card"><div class="ch"><h2>Handled</h2><span class="sub">${done.length}</span></div><div class="tablewrap"><table><tbody>${done.map((r) => `<tr class="click" data-open="${r.employer_id}"><td class="n">${fmtShort(r.received_at)}</td><td>${esc(r.employer_name)}</td><td>${esc(r.contact_name || r.from_email)}</td><td><span class="pill ${CAT_PILL[r.category]}">${CAT_LABEL[r.category]}</span></td></tr>`).join("")}</tbody></table></div></section>` : ""}`;
+}
+
+/* ---------------- performance ---------------- */
+async function renderPerformance() {
+  const d = await api("/api/performance");
+  const k = d.kpis; const days = d.daily.map((x) => ({ day: x.day, sent: Number(x.sent), rep: Number(x.replies) }));
+  const max = Math.max(5, ...days.map((x) => x.sent)); const top = Math.ceil(max / 10) * 10;
+  const W = 640, H = 200, pl = 32, pb = 24, pt = 10, bw = (W - pl - 8) / days.length; const y = (v) => pt + (H - pt - pb) * (1 - v / top);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Emails sent and replies per day, last 14 days">`;
+  for (let g = 0; g <= top; g += top / 2) svg += `<line x1="${pl}" x2="${W - 8}" y1="${y(g)}" y2="${y(g)}" stroke="var(--line)"/><text x="${pl - 6}" y="${y(g) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${g}</text>`;
+  days.forEach((x, i) => { const X = pl + i * bw + bw * 0.15, w = bw * 0.7; const lab = new Date(x.day + (String(x.day).length <= 10 ? "T12:00:00Z" : "")).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    svg += `<rect x="${X}" y="${y(x.sent)}" width="${w}" height="${H - pb - y(x.sent)}" rx="2" fill="var(--accent)" opacity="${i === days.length - 1 ? 1 : 0.55}"><title>${lab}: ${x.sent} sent</title></rect>`;
+    if (x.rep) svg += `<rect x="${X + w * 0.25}" y="${y(x.rep)}" width="${w * 0.5}" height="${H - pb - y(x.rep)}" rx="2" fill="var(--good)"><title>${lab}: ${x.rep} replies</title></rect>`;
+    if (i % 2 === 1 || i === days.length - 1) svg += `<text x="${X + w / 2}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--muted)">${lab}</text>`; });
+  svg += "</svg>";
+  return `<div class="head"><div><h1>Performance</h1><p>The proposal's success measures, split by where each employer came from.</p></div></div>
+  <div class="kpis">
+    <div class="kpi"><span class="l">Qualified employers discovered</span><span class="v">${k.qualified}</span><span class="s">${k.blocked} blocked or excluded</span></div>
+    <div class="kpi"><span class="l">Unique employers contacted</span><span class="v">${k.contacted}</span><span class="s">${k.sent} emails sent</span></div>
+    <div class="kpi"><span class="l">Usable contacts</span><span class="v">${k.usable_contacts}</span><span class="s">${k.bounces} bounced</span></div>
+    <div class="kpi"><span class="l">Human replies</span><span class="v">${k.human_replies}</span><span class="s">${k.positive} positive</span></div>
+    <div class="kpi"><span class="l">Meetings booked</span><span class="v">${k.meetings}</span><span class="s">marked from replies</span></div>
+    <div class="kpi"><span class="l">Lusha credits</span><span class="v">${d.credits.month}</span><span class="s">${d.credits.today} today</span></div>
+  </div>
+  <section class="card chart"><div class="ch"><h2>Daily outreach, last 14 days</h2><div class="legend"><span><i style="background:var(--accent)"></i>Emails sent</span><span><i style="background:var(--good)"></i>Replies</span></div></div><div class="cb">${svg}</div></section>
+  <section class="card"><div class="ch"><h2>By source</h2></div><div class="tablewrap"><table><thead><tr><th>Source</th><th>Employers</th><th>Contacted</th><th>Replied</th><th>Positive</th><th>Reply rate</th></tr></thead><tbody>${d.bySource.map((r) => `<tr><td><b>${esc(r.src)}</b></td><td class="n">${r.employers}</td><td class="n">${r.contacted}</td><td class="n">${r.replied}</td><td class="n">${r.positive}</td><td class="n">${Number(r.contacted) ? Math.round((Number(r.replied) / Number(r.contacted)) * 100) + "%" : "—"}</td></tr>`).join("")}</tbody></table></div></section>`;
+}
+
+/* ---------------- settings ---------------- */
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+async function renderSettings() {
+  const d = ui.settingsData = await api("/api/settings");
+  const s = d.settings; const I = d.integrations; const t = s.templates[ui.tpl];
+  const connectedMsg = new URLSearchParams(location.hash.split("?")[1] || "").get("connected");
+  const days = (key) => `<div class="checks">${DOW.map((n, i) => `<label><input type="checkbox" data-days="${key}" value="${i}" id="${key}-${i}" ${s[key].includes(i) ? "checked" : ""}>${n}</label>`).join("")}</div>`;
+  const num = (id, path, val, label, hint, min = 0, max = 10000) => `<div class="field"><label for="${id}">${label}</label><input type="number" id="${id}" data-path="${path}" min="${min}" max="${max}" value="${val}">${hint ? `<span class="hint">${hint}</span>` : ""}</div>`;
+  const time = (id, path, val, label) => `<div class="field"><label for="${id}">${label}</label><input type="text" id="${id}" data-path="${path}" data-kind="text" value="${esc(val)}" pattern="\\d{1,2}:\\d{2}"></div>`;
+  const sw = (id, path, val, label, hint) => `<label class="switch"><input type="checkbox" id="${id}" data-path="${path}" ${val ? "checked" : ""}><span><b>${label}</b><small>${hint}</small></span></label>`;
+  return `<div class="head"><div><h1>Settings</h1><p>Integrations, daily schedule, sending limits, Lusha budget, targeting rules, protected accounts and templates. Changes save as you make them.</p></div></div>
+  ${connectedMsg ? `<div class="banner" style="background:var(--good-soft)"><b style="color:var(--good)">Connected</b><span>Outlook is connected as ${esc(connectedMsg)}.</span></div>` : ""}
+  ${I.sendBlocked ? `<div class="banner" style="background:var(--bad-soft)"><b style="color:var(--bad)">Sending stopped</b><span>${esc(I.sendBlocked.reason)} <button class="btn sm" data-act="unblock">I fixed it, resume sending</button></span></div>` : ""}
+
+  <section class="card"><div class="ch"><h2>Integrations</h2><span class="sub">Keys live in Railway → Variables, never here</span></div><div class="tablewrap"><table><tbody>
+    <tr><td><b>Outlook (Microsoft 365)</b><div class="sub">Sends email and reads replies as the signed-in mailbox.</div></td><td>${I.outlook.connected ? `<span class="pill p-good">Connected</span> <span class="mono">${esc(I.outlook.email)}</span>` : I.outlookApp ? '<span class="pill p-warn">Not connected</span>' : '<span class="pill p-bad">MS_CLIENT_ID / MS_CLIENT_SECRET missing</span>'}<div class="sub mono">Redirect URI: ${esc(I.redirectUri)}</div></td><td><div class="actions">${I.outlookApp ? `<a class="btn sm primary" href="/auth/microsoft/start" style="text-decoration:none">${I.outlook.connected ? "Reconnect" : "Connect Outlook"}</a>` : ""}${I.outlook.connected ? '<button class="btn sm" data-act="testEmail">Send test email to myself</button><button class="btn sm danger" data-act="disconnect">Disconnect</button>' : ""}</div></td></tr>
+    <tr><td><b>Lusha</b><div class="sub">Prospecting, decision-maker lookup and contact reveal.</div></td><td>${I.lusha ? `<span class="pill p-good">API key set</span> <span class="sub">${d.credits.today} credits today · ${d.credits.month} this month</span>` : '<span class="pill p-bad">LUSHA_API_KEY missing</span>'}</td><td>${I.lusha ? '<button class="btn sm" data-act="lushaCheck">Test Lusha connection</button>' : ""}</td></tr>
+    <tr><td><b>PracticeMatch</b><div class="sub">Import an export now; the automated monitor plugs in next.</div></td><td><span class="pill p-info">Import ready</span></td><td><label class="btn sm" for="pmfile" style="cursor:pointer">Import CSV or JSON</label><input type="file" id="pmfile" accept=".csv,.json,text/csv,application/json" hidden></td></tr>
+    <tr><td><b>Sending mode</b></td><td>${I.dryRun ? '<span class="pill p-warn">Dry run: nothing is sent</span>' : '<span class="pill p-good">Live</span>'}<div class="sub">Change with DRY_RUN in Railway.</div></td><td></td></tr>
+    <tr><td><b>AI checks</b><div class="sub">Optional: classifies employers and replies the rules can't.</div></td><td>${I.ai ? '<span class="pill p-good">On</span>' : '<span class="pill p-mute">Off (rules only)</span>'}</td><td></td></tr>
+  </tbody></table></div><div class="cb" id="lushaOut" hidden></div></section>
+
+  <section class="card"><div class="ch"><h2>Automation</h2></div><div class="cb form">
+    ${sw("s-supervised", "supervised", s.supervised, "Supervised launch", "Every qualified employer waits for your approval before outreach.")}
+    ${sw("s-paused", "paused", s.paused, "Pause all automation", "Stops sending and auto-enrollment. Discovery keeps running.")}
+    ${sw("s-autoEnrich", "autoEnrich", s.autoEnrich, "Fill missing contacts with Lusha", "Look up a decision-maker when a listing has no usable contact.")}
+    ${sw("s-autoEnroll", "autoEnroll", s.autoEnroll, "Auto-enroll when not supervised", "Employers that reach Ready are enrolled after each discovery run.")}
+    ${num("s-threshold", "threshold", s.threshold, "Auto-approve score", "Used only when supervised launch is off.", 0, 100)}
+  </div></section>
+
+  <section class="card"><div class="ch"><h2>Daily schedule</h2><span class="sub">${esc(I.timezone)}</span></div><div class="cb form">
+    ${time("s-dt", "discoveryTime", s.discoveryTime, "Discovery runs at")}
+    <div class="field"><span style="font-weight:500;font-size:13px">Discovery days</span>${days("discoveryDays")}</div>
+    ${time("s-ws", "sendWindowStart", s.sendWindowStart, "Send window opens")}
+    ${time("s-we", "sendWindowEnd", s.sendWindowEnd, "Send window closes")}
+    <div class="field"><span style="font-weight:500;font-size:13px">Send days</span>${days("sendDays")}</div>
+    ${num("s-poll", "replyPollMinutes", s.replyPollMinutes, "Check inbox every (minutes)", "", 2, 120)}
+  </div></section>
+
+  <section class="card"><div class="ch"><h2>Sending limits</h2></div><div class="cb form">
+    ${num("s-cap", "dailyCap", s.dailyCap, "Daily cap", "Hard ceiling on emails per day, follow-ups included.", 1, 500)}
+    ${sw("s-warm", "warmup.enabled", s.warmup.enabled, "Warm-up ramp", "Start low and add a few per send day until the daily cap.")}
+    ${num("s-ws0", "warmup.startPerDay", s.warmup.startPerDay, "Warm-up: first day", "", 1, 500)}
+    ${num("s-wsi", "warmup.increasePerDay", s.warmup.increasePerDay, "Warm-up: add per day", "", 0, 100)}
+    ${num("s-gmin", "minGapSeconds", s.minGapSeconds, "Spacing: minimum seconds between emails", "", 0, 3600)}
+    ${num("s-gmax", "maxGapSeconds", s.maxGapSeconds, "Spacing: maximum seconds", "", 0, 7200)}
+    ${num("s-per", "perEmployerPerDay", s.perEmployerPerDay, "Emails per organization per day", "", 1, 5)}
+    ${num("s-f1", "followupGap1Days", s.followupGap1Days, "Follow-up 1 after (send days)", "", 1, 30)}
+    ${num("s-f2", "followupGap2Days", s.followupGap2Days, "Follow-up 2 after (send days)", "", 1, 30)}
+  </div></section>
+
+  <section class="card"><div class="ch"><h2>Lusha</h2></div><div class="cb form">
+    ${sw("s-lp", "lusha.prospectingEnabled", s.lusha.prospectingEnabled, "Daily nationwide prospecting", "Find decision-makers at healthcare employers with no PracticeMatch listing yet.")}
+    ${num("s-lpp", "lusha.pagesPerDay", s.lusha.pagesPerDay, "Search pages per day", "", 0, 20)}
+    ${num("s-lps", "lusha.pageSize", s.lusha.pageSize, "Results per page", "", 10, 100)}
+    ${num("s-lmc", "lusha.maxContactsPerCompany", s.lusha.maxContactsPerCompany, "Contacts per company", "", 1, 5)}
+    ${num("s-lrl", "lusha.dailyRevealLimit", s.lusha.dailyRevealLimit, "Contact reveals per day", "Reveals are what spend credits.", 0, 1000)}
+    ${num("s-lmb", "lusha.monthlyCreditBudget", s.lusha.monthlyCreditBudget, "Monthly credit budget", "Lusha work stops for the month at this number.", 0, 1000000)}
+    <div class="field"><label for="s-ljt">Job titles to search</label><textarea id="s-ljt" data-path="lusha.jobTitles" data-kind="list">${esc(s.lusha.jobTitles.join("\n"))}</textarea></div>
+    <div class="field"><label for="s-lind">Industries (Lusha labels)</label><textarea id="s-lind" data-path="lusha.industriesLabels" data-kind="list">${esc(s.lusha.industriesLabels.join("\n"))}</textarea></div>
+    <div class="field"><label for="s-lst">States (blank = nationwide)</label><textarea id="s-lst" data-path="lusha.states" data-kind="list">${esc(s.lusha.states.join("\n"))}</textarea></div>
+  </div></section>
+
+  <section class="card"><div class="ch"><h2>Targeting</h2></div><div class="cb" style="display:flex;flex-direction:column;gap:14px">
+    <div class="form">
+      <div class="field"><label for="s-spec">Target specialties</label><textarea id="s-spec" data-path="specialties" data-kind="list">${esc(s.specialties.join("\n"))}</textarea><span class="hint">An employer whose openings match none of these goes to review.</span></div>
+      <div class="field"><span style="font-weight:500;font-size:13px">Target employer types</span><div class="checks">${d.types.map((x, i) => `<label><input type="checkbox" data-type="${esc(x)}" id="ty-${i}" ${s.types.includes(x) ? "checked" : ""}>${esc(x)}</label>`).join("")}</div></div>
+      <div class="field"><label for="s-excl">Exclusion keywords</label><textarea id="s-excl" data-path="excludeKeywords" data-kind="text">${esc(s.excludeKeywords)}</textarea><span class="hint">Employer names containing these are treated as competitors.</span></div>
+      <div class="field"><label for="s-titles">Contact title priority</label><textarea id="s-titles" data-path="titlePriority" data-kind="text">${esc(s.titlePriority)}</textarea><span class="hint">Best first. Lusha contacts matching none of these are never emailed.</span></div>
+    </div>
+  </div></section>
+
+  <section class="card"><div class="ch"><h2>Protected accounts</h2><span class="sub">${d.protectedAccounts.length} current clients</span></div><div class="cb grid2">
+    <div class="field"><label for="prot-add">Add clients (one per line: Name | domain)</label><textarea id="prot-add" placeholder="Riverbend Health System | riverbendhealth.org"></textarea><div class="actions"><button class="btn sm primary" data-act="addProtected">Add to protected list</button></div><span class="hint">Matched on name and domain before any outreach and before Lusha credits are spent. Adding a client stops any running sequence.</span></div>
+    <div class="tablewrap" style="max-height:260px;overflow:auto">${d.protectedAccounts.length ? `<table><tbody>${d.protectedAccounts.map((p) => `<tr><td>${esc(p.name)}</td><td class="mono">${esc(p.domain || "")}</td><td><button class="btn sm" data-delprot="${p.id}">Remove</button></td></tr>`).join("")}</tbody></table>` : '<div class="empty">No protected accounts yet. Add your current clients before going live.</div>'}</div>
+  </div></section>
+
+  <section class="card"><div class="ch"><h2>Suppression list</h2><span class="sub">${d.suppressions.length}</span></div>${d.suppressions.length ? `<div class="tablewrap" style="max-height:240px;overflow:auto"><table><tbody>${d.suppressions.map((x) => `<tr><td class="mono">${esc(x.value)}</td><td>${esc(x.reason || "")}</td><td class="n">${fmtShort(x.created_at)}</td><td><button class="btn sm" data-delsupp="${x.id}">Remove</button></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Opt-outs and bounces land here automatically.</div>'}</section>
+
+  <section class="card"><div class="ch"><h2>Sender and compliance</h2></div><div class="cb form">
+    <div class="field"><label for="s-sn">Sender name in signature</label><input type="text" id="s-sn" data-path="senderName" data-kind="text" value="${esc(s.senderName)}"></div>
+    <div class="field"><label for="s-addr">Company postal address</label><input type="text" id="s-addr" data-path="companyAddress" data-kind="text" value="${esc(s.companyAddress)}" placeholder="Street, City, State ZIP"><span class="hint">Required in every commercial email (CAN-SPAM). Sequences pause until it's set.</span></div>
+    <div class="field"><label for="s-opt">Opt-out line</label><input type="text" id="s-opt" data-path="optOutLine" data-kind="text" value="${esc(s.optOutLine)}"></div>
+  </div></section>
+
+  <section class="card"><div class="ch"><h2>Email templates</h2><div class="tabs">${Object.entries(s.templates).map(([k, v]) => `<button class="tab" data-tpl="${k}" aria-pressed="${k === ui.tpl}">${esc(v.label)}</button>`).join("")}</div></div><div class="cb" style="display:flex;flex-direction:column;gap:10px">
+    <div class="field"><label for="tpl-subject">Subject${ui.tpl.startsWith("followup") ? " (follow-ups reply in the original thread, so this is only used if that thread can't be found)" : ""}</label><input type="text" id="tpl-subject" data-tplf="subject" value="${esc(t.subject)}"></div>
+    <div class="field"><label for="tpl-body">Body</label><textarea id="tpl-body" data-tplf="body" style="min-height:240px">${esc(t.body)}</textarea><span class="hint">Fields: {{first_name}} {{employer}} {{role}} {{specialty}} {{city}} {{state}} {{more_openings}} {{signal_line}} {{sender_name}}. Each comes from the verified listing or employer record; a missing field pauses the sequence instead of guessing. The opt-out line and address are added automatically.</span></div>
+    <div class="actions"><button class="btn sm" data-act="resetTpl">Restore default</button></div>
+  </div></section>`;
+}
+
+/* ---------------- drawer ---------------- */
+async function renderDrawer() {
+  const root = document.getElementById("drawerRoot");
+  if (!ui.drawer) { root.innerHTML = ""; return; }
+  const d = await api(`/api/employers/${ui.drawer}`);
+  const e = d.employer; const open = d.seqs.find((x) => ["active", "paused"].includes(x.status));
+  const pill = statusPill({ ...e, sequence: d.seqs[0] ? { status: d.seqs[0].status, step: d.seqs[0].step, replied: d.seqs[0].replied } : null });
+  const fakeRow = { id: e.id, bucket: e.bucket, decision: e.decision, sequence: d.seqs[0] ? { status: d.seqs[0].status, replied: d.seqs[0].replied } : null };
+  root.innerHTML = `<div class="scrim" data-act="close"></div><aside class="drawer" role="dialog" aria-modal="true" aria-label="${esc(e.name)}">
+  <div class="dh"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><h2>${esc(e.name)}</h2><div class="meta"><span>${esc(e.type)}</span><span>${esc(e.city || "")}${e.state ? ", " + esc(e.state) : ""}</span><span class="mono">${esc(e.domain || "no domain")}</span></div></div><button class="x" data-act="close" aria-label="Close">×</button></div>
+  <div class="actions">${pill} ${srcChips(e.sources)} <span class="sub">Score ${e.score ?? "—"} · first seen ${fmtShort(e.first_seen)}</span></div>
+  ${(e.reasons || []).length ? `<ul class="reasons">${e.reasons.map((x) => "<li>" + esc(x) + "</li>").join("")}</ul>` : ""}
+  <div class="actions">${rowActions(fakeRow)}${e.status !== "protected" && e.decision !== "suppressed" ? `<button class="btn sm" data-emp="${e.id}" data-a="hold">Hold</button><button class="btn sm danger" data-emp="${e.id}" data-a="protect">Mark as current client</button>` : ""}</div></div>
+  <div class="ds"><h3>Openings · ${d.openings.filter((o) => o.active).length} active</h3>${d.openings.length ? `<div class="tablewrap"><table><thead><tr><th>Role</th><th>Location</th><th>Posted</th><th>Listing</th></tr></thead><tbody>${d.openings.map((o) => `<tr${o.active ? "" : ' style="opacity:.55"'}><td>${esc(o.specialty)} ${esc(o.role)}${o.restriction ? `<div class="sub" style="color:var(--warn)">"${esc(o.restriction)}"</div>` : ""}</td><td>${esc(o.city || "")}${o.state ? ", " + esc(o.state) : ""}</td><td class="n">${fmtShort(o.posted_at)}</td><td class="mono"><span class="src pm">PM</span>${o.url ? `<a href="${esc(o.url)}" target="_blank" rel="noopener">${esc(o.external_id)}</a>` : esc(o.external_id)}</td></tr>`).join("")}</tbody></table></div>` : '<p class="sub" style="margin:0">No PracticeMatch listing. Found through Lusha.</p>'}</div>
+  <div class="ds"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h3>Contacts · ${d.contacts.length}</h3>${e.domain || !d.contacts.length ? `<button class="btn sm" data-emp="${e.id}" data-a="enrich">Find via Lusha</button>` : ""}</div>
+  ${d.contacts.map((c) => `<div class="contact${c.selected ? " sel" : ""}"><input type="radio" name="ct" id="ct-${c.id}" data-choose="${c.id}" data-emp-id="${e.id}" ${c.selected ? "checked" : ""} ${c.usable && !open ? "" : "disabled"} aria-label="Use ${esc(c.full_name)}"><label for="ct-${c.id}"><b>${esc(c.full_name || c.email)}</b>${c.title ? " · " + esc(c.title) : ""}<div class="sub mono">${esc(c.email || "no email")}${c.phone ? " · " + esc(c.phone) : ""}${c.email_confidence ? " · " + esc(c.email_confidence) : ""}</div>${c.usable ? "" : `<div class="sub">${esc(c.unusableReason)}</div>`}</label><span>${srcChips(c.sources)}</span></div>`).join("") || '<p class="sub" style="margin:0">No contacts yet.</p>'}
+  <details><summary class="sub" style="cursor:pointer">Add a contact by hand</summary><div class="form" style="margin-top:8px"><div class="field"><label for="nc-name">Name</label><input type="text" id="nc-name"></div><div class="field"><label for="nc-title">Title</label><input type="text" id="nc-title"></div><div class="field"><label for="nc-email">Email</label><input type="text" id="nc-email"></div></div><div class="actions" style="margin-top:8px"><button class="btn sm" data-emp="${e.id}" data-a="addContact">Add contact</button></div></details></div>
+  <div class="ds"><h3>${d.preview ? `${open ? "Next email" : "First email"} · ${esc(d.preview.template)}` : "Email"}</h3>
+  ${d.preview ? `<div class="email"><div class="subj">${esc(d.preview.subject)}</div>${esc(d.preview.body)}</div>${d.preview.missing.length ? `<span class="pill p-warn">Can't send yet. Missing: ${esc(d.preview.missing.join(", "))}</span>` : ""}${open ? `<span class="sub">${open.status === "active" ? "Scheduled " + fmtTime(open.next_at) : esc(open.stop_reason || "")}</span>` : ""}` : '<p class="sub" style="margin:0">Add a usable contact to preview outreach.</p>'}
+  ${d.messages.length || d.replies.length ? `<div class="tablewrap"><table><tbody>${d.messages.map((m) => `<tr><td class="n">${fmtShort(m.sent_at)}</td><td>${m.step === 0 ? "Initial" : "Follow-up " + m.step}</td><td>${esc(m.subject)} ${m.status !== "sent" ? `<span class="pill ${m.status === "failed" ? "p-bad" : "p-warn"}">${m.status === "failed" ? "Failed" : "Dry run"}</span>` : ""}</td></tr>`).join("")}${d.replies.map((r) => `<tr><td class="n">${fmtShort(r.received_at)}</td><td>Reply</td><td><span class="pill ${CAT_PILL[r.category]}">${CAT_LABEL[r.category]}</span> ${esc((r.body_preview || "").slice(0, 160))}</td></tr>`).join("")}</tbody></table></div>` : ""}</div>
+  <div class="ds"><h3>Notes</h3>${(e.notes || []).map((n) => `<div class="sub">${fmtShort(n.at)}: ${esc(n.text)}</div>`).join("")}<div style="display:flex;gap:8px"><input type="text" id="note-in" placeholder="Add a qualification note"><button class="btn sm" data-emp="${e.id}" data-a="note">Add</button></div></div>
+  <div class="ds"><h3>History</h3><ul class="timeline">${d.events.map((h) => `<li><span class="t">${fmtShort(h.at)}</span><span>${esc(h.text)}</span></li>`).join("")}</ul></div>
+  </aside>`;
+}
+
+/* ---------------- render loop ---------------- */
+async function renderAll() {
+  try {
+    ui.overview = await api("/api/overview");
+    await renderNav();
+    const v = view();
+    const html = await ({ today: renderToday, queue: renderQueue, outreach: renderOutreach, responses: renderResponses, performance: renderPerformance, settings: renderSettings })[v]();
+    const m = document.getElementById("main");
+    const focusId = document.activeElement?.id; const pos = document.activeElement?.selectionStart;
+    m.innerHTML = html;
+    if (focusId === "qsearch") { const el = document.getElementById("qsearch"); el.focus(); try { el.setSelectionRange(pos, pos); } catch {} }
+    await renderDrawer();
+  } catch (e) { toast(e.message, true); }
+}
+async function act(promise, okMsg) {
+  try { const r = await promise; toast(r?.message || okMsg || "Done"); await renderAll(); return r; }
+  catch (e) { toast(e.message, true); }
+}
+
+/* ---------------- settings writes ---------------- */
+function setPath(obj, path, val) { const ks = path.split("."); const out = {}; let cur = out; ks.forEach((k, i) => { if (i === ks.length - 1) cur[k] = val; else cur = cur[k] = {}; }); return out; }
+let saveTimer = null;
+async function saveSetting(patch, quiet) {
+  try { await api("/api/settings", { method: "PUT", body: patch }); if (!quiet) toast("Saved"); ui.overview = await api("/api/overview"); renderNav(); }
+  catch (e) { toast(e.message, true); }
+}
+
+document.addEventListener("click", async (ev) => {
+  const t = ev.target;
+  const tab = t.closest("[data-tab]"); if (tab) { ui.queueTab = tab.dataset.tab; return renderAll(); }
+  const tp = t.closest("[data-tpl]"); if (tp) { ui.tpl = tp.dataset.tpl; return renderAll(); }
+  const emp = t.closest("[data-emp][data-a]");
+  if (emp) {
+    ev.stopPropagation();
+    const a = emp.dataset.a; const body = { action: a };
+    if (a === "note") body.text = document.getElementById("note-in").value;
+    if (a === "addContact") Object.assign(body, { name: document.getElementById("nc-name").value, title: document.getElementById("nc-title").value, email: document.getElementById("nc-email").value });
+    emp.disabled = true;
+    return act(api(`/api/employers/${emp.dataset.emp}/action`, { method: "POST", body }));
+  }
+  const rep = t.closest("[data-rep]"); if (rep) { rep.disabled = true; return act(api(`/api/replies/${rep.dataset.rep}/action`, { method: "POST", body: { action: rep.dataset.a } })); }
+  const dp = t.closest("[data-delprot]"); if (dp) return act(api(`/api/protected/${dp.dataset.delprot}`, { method: "DELETE", body: {} }), "Removed");
+  const ds = t.closest("[data-delsupp]"); if (ds) return act(api(`/api/suppressions/${ds.dataset.delsupp}`, { method: "DELETE", body: {} }), "Removed");
+  const a = t.closest("[data-act]");
+  if (a) {
+    switch (a.dataset.act) {
+      case "close": ui.drawer = null; return renderDrawer();
+      case "runDiscovery": a.disabled = true; a.textContent = "Running…"; return act(api("/api/jobs/discovery", { method: "POST", body: {} }).then((r) => ({ message: r.summary ? `Discovery done: ${r.summary.newEmployers} new employers, ${r.summary.newContacts} new contacts` : "Discovery already running" })));
+      case "sendNow": a.disabled = true; return act(api("/api/send/now", { method: "POST", body: {} }).then((r) => ({ message: r.sent ? `${r.dryRun ? "Composed (dry run)" : "Sent"}: ${r.to}` : `Not sent: ${r.reason}` })));
+      case "pollReplies": return act(api("/api/jobs/replies", { method: "POST", body: {} }).then((r) => ({ message: r.summary.reason || `${r.summary.checked} inbox messages checked, ${r.summary.matched} replies matched` })));
+      case "bulk": return act(api("/api/queue/bulk", { method: "POST", body: { action: a.dataset.v } }));
+      case "addProtected": return act(api("/api/protected", { method: "POST", body: { text: document.getElementById("prot-add").value } }));
+      case "disconnect": return act(api("/api/outlook/disconnect", { method: "POST", body: {} }), "Outlook disconnected");
+      case "testEmail": return act(api("/api/outlook/test", { method: "POST", body: {} }));
+      case "unblock": return act(api("/api/send/unblock", { method: "POST", body: {} }), "Sending resumed");
+      case "resetTpl": { const def = (await api("/api/settings")).defaults.templates[ui.tpl]; await saveSetting({ templates: { [ui.tpl]: def } }); return renderAll(); }
+      case "lushaCheck": {
+        const out = document.getElementById("lushaOut"); out.hidden = false; out.innerHTML = '<span class="sub">Running a 10-result test search (no credits for reveals)…</span>';
+        try { const r = await api("/api/lusha/check"); out.innerHTML = `<b>Lusha responded.</b> ${r.previews.length} sample prospects, ${esc(r.pagination.total ?? "?")} total matches.<div class="tablewrap"><table><tbody>${r.previews.map((p) => `<tr><td>${esc(p.fullName)}</td><td>${esc(p.title)}</td><td>${esc(p.companyName)}</td><td class="mono">${esc(p.companyDomain || "")}</td></tr>`).join("")}</tbody></table></div>`; }
+        catch (e) { out.innerHTML = `<span class="pill p-bad">Lusha error</span> ${esc(e.message)}`; }
+        return;
+      }
+    }
+  }
+  const o = t.closest("[data-open]"); if (o && !t.closest("button")) { ev.preventDefault(); ui.drawer = o.dataset.open; return renderDrawer().catch((e) => toast(e.message, true)); }
+});
+
+document.addEventListener("change", async (ev) => {
+  const t = ev.target;
+  if (t.dataset.task) return act(api(`/api/tasks/${t.dataset.task}/done`, { method: "POST", body: {} }), "Task completed");
+  if (t.dataset.choose) return act(api(`/api/employers/${t.dataset.empId}/action`, { method: "POST", body: { action: "choose", contactId: Number(t.dataset.choose) } }), "Contact selected");
+  if (t.id === "pmfile" && t.files[0]) {
+    const f = t.files[0]; const text = await f.text();
+    return act(api("/api/import/practicematch", { method: "POST", body: { text, kind: f.name.endsWith(".json") ? "json" : "csv" } }));
+  }
+  if (t.dataset.days) {
+    const key = t.dataset.days; const vals = [...document.querySelectorAll(`[data-days="${key}"]:checked`)].map((x) => Number(x.value));
+    return saveSetting({ [key]: vals });
+  }
+  if (t.dataset.type) {
+    const vals = [...document.querySelectorAll("[data-type]:checked")].map((x) => x.dataset.type);
+    return saveSetting({ types: vals });
+  }
+  if (t.dataset.path) {
+    let val = t.type === "checkbox" ? t.checked : t.type === "number" ? Number(t.value) : t.value;
+    if (t.dataset.kind === "list") val = t.value.split("\n").map((x) => x.trim()).filter(Boolean);
+    return saveSetting(setPath({}, t.dataset.path, val));
+  }
+  if (t.dataset.tplf) {
+    const cur = ui.settingsData.settings.templates[ui.tpl];
+    return saveSetting({ templates: { [ui.tpl]: { ...cur, [t.dataset.tplf]: t.value } } });
+  }
+});
+document.addEventListener("input", (ev) => {
+  if (ev.target.id === "qsearch") { clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
+});
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && ui.drawer) { ui.drawer = null; renderDrawer(); } });
+window.addEventListener("hashchange", () => { renderAll(); window.scrollTo(0, 0); });
+setInterval(() => { if (!document.hidden && !ui.drawer && !["settings"].includes(view()) && document.activeElement?.tagName !== "INPUT") renderAll(); }, 60000);
+renderAll();
+</script>
+
+</body>
+</html>
