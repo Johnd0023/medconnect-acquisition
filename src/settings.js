@@ -92,6 +92,14 @@ export const DEFAULT_SETTINGS = {
     maxContactsPerCompany: 2,
     dailyRevealLimit: 40,      // max contacts revealed (credit spend) per day
     monthlyCreditBudget: 1500,
+    // Company filter for the Lusha search. NAICS = U.S. industry codes for hands-on patient care:
+    // 622 hospitals · 6211 physician offices · 621420 outpatient mental health · 621493 urgent care / freestanding ER
+    // 621498 other outpatient care centers (incl. community health centers) · 621491 HMO medical centers
+    companyFilter: 'naics',    // naics | sic | industries
+    naicsCodes: ['622', '6211', '621420', '621491', '621493', '621498'],
+    // SIC equivalents (fallback): 8011 doctors' offices · 8062 general hospitals · 8063 psychiatric hospitals
+    // 8069 specialty hospitals · 8093 specialty outpatient facilities
+    sicCodes: ['8011', '8062', '8063', '8069', '8093'],
     prospectTiers: [1, 2],     // tiers searched nationwide (recruiting roles); all tiers are used at employers we already know
     jobTitles: [],             // legacy; the search now uses every title in the four priority tiers
     industriesLabels: [],      // Lusha industry labels (optional; use Settings → Lusha → Find industry IDs)

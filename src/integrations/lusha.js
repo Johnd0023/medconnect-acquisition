@@ -71,6 +71,8 @@ export function normalizeContact(r) {
     companyDomain: normDomain(company.domain || company.fqdn || d.companyDomain || d.fqdn),
     companyId: company.id != null ? String(company.id) : (d.companyId != null ? String(d.companyId) : null),
     industry: findIndustry(company) || findIndustry(d) || '',
+    naics: findCodes(company, /naics/i),
+    sic: findCodes(company, /\bsic|sics|sicCode/i),
     city: d.location?.city || null,
     state: d.location?.state || null,
     hasEmail: Boolean(best) || (Array.isArray(d.has) ? d.has.includes('emails') : Boolean(d.has?.emails)),
@@ -118,12 +120,30 @@ function excludeNames(settings) {
   return (settings.doNotProspect || '').split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 100);
 }
 
-function companyInclude(L) {
+function companyInclude(L, mode = L.companyFilter || 'naics') {
+  if (mode === 'naics' && L.naicsCodes?.length) return { naicsCodes: L.naicsCodes.map(String) };
+  if ((mode === 'naics' || mode === 'sic') && L.sicCodes?.length) return { sicCodes: L.sicCodes.map(String) };
   const inc = {};
   if (L.mainIndustriesIds?.length) inc.mainIndustriesIds = L.mainIndustriesIds.map(Number);
   if (L.subIndustriesIds?.length) inc.subIndustriesIds = L.subIndustriesIds.map(Number);
   if (L.industriesLabels?.length) inc.industriesLabels = L.industriesLabels;
   return inc;
+}
+
+/** Collect NAICS / SIC codes from any field whose name mentions them. */
+export function findCodes(obj, re) {
+  const out = [];
+  const walk = (v, depth) => {
+    if (!v || typeof v !== 'object' || depth > 2) return;
+    for (const [k, x] of Object.entries(v)) {
+      if (re.test(k)) {
+        const arr = Array.isArray(x) ? x : [x];
+        for (const c of arr) { const code = typeof c === 'object' ? (c?.code ?? c?.id ?? c?.value) : c; if (code != null && /^\d{2,6}$/.test(String(code))) out.push(String(code)); }
+      } else if (typeof x === 'object') walk(x, depth + 1);
+    }
+  };
+  walk(obj, 0);
+  return [...new Set(out)];
 }
 
 /** Find Lusha's industry filter values on this account. Tries the known filter endpoints and returns
@@ -156,31 +176,25 @@ export async function industryValues() {
 export async function prospectContacts(settings, page) {
   const L = settings.lusha;
   const locations = (L.states?.length ? L.states.map((s) => ({ country: 'United States', state: s })) : [{ country: 'United States' }]);
-  const body = {
+  const mode = L.companyFilter || 'naics';
+  const build = (m, extras) => ({
     pagination: { page, size: Math.min(100, Math.max(10, L.pageSize)) },
     filters: {
       contacts: { include: { jobTitles: searchTitles(settings), locations, existingDataPoints: ['work_email'] } },
-      companies: { include: companyInclude(L), exclude: { names: excludeNames(settings) } },
+      companies: { include: companyInclude(L, m), ...(extras ? { exclude: { names: excludeNames(settings) } } : {}) },
     },
-    // Plan-dependent options. If Lusha rejects one for this plan, retry without options;
-    // contacts-per-company is also enforced on our side, and DNC phones are never used (email only).
-    options: { maxContactsPerCompany: L.maxContactsPerCompany },
-  };
-  let json;
-  try {
-    json = await call('POST', '/v3/contacts/prospecting', body);
-  } catch (e) {
-    if (!(e instanceof LushaError) || ![400, 403, 422].includes(e.status)) throw e;
-    // Drop plan-dependent extras one at a time (options, then company excludes) and retry.
-    delete body.options;
-    try { json = await call('POST', '/v3/contacts/prospecting', body); }
-    catch (e2) {
-      if (!(e2 instanceof LushaError) || ![400, 403, 422].includes(e2.status)) throw e2;
-      delete body.filters.companies.exclude;
-      json = await call('POST', '/v3/contacts/prospecting', body);
-    }
+    ...(extras ? { options: { maxContactsPerCompany: L.maxContactsPerCompany } } : {}),
+  });
+  // Try the chosen company filter first; if this plan rejects a field, fall back step by step.
+  const attempts = mode === 'naics' ? [['naics', true], ['naics', false], ['sic', false], ['industries', false]]
+    : mode === 'sic' ? [['sic', true], ['sic', false], ['industries', false]] : [['industries', true], ['industries', false]];
+  let json; let lastErr; let used = null;
+  for (const [m, extras] of attempts) {
+    try { json = await call('POST', '/v3/contacts/prospecting', build(m, extras)); used = m; break; }
+    catch (e) { lastErr = e; if (!(e instanceof LushaError) || ![400, 403, 422].includes(e.status)) throw e; }
   }
-  return { results: collectContacts(json.results ?? json).map(normalizeContact).filter(Boolean), pagination: json.pagination || {}, raw: json };
+  if (!json) throw lastErr;
+  return { results: collectContacts(json.results ?? json).map(normalizeContact).filter(Boolean), pagination: json.pagination || {}, raw: json, filterUsed: used, companyFilterSent: companyInclude(L, used) };
 }
 
 /** Ranked decision-makers at known companies (by domain). Returns previews (no emails). */

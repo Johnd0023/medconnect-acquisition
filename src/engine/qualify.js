@@ -117,11 +117,33 @@ export function onDoNotProspect(normalizedName, ctx) {
 
 /** Decide, before spending any Lusha credits, whether a prospect's company is worth unlocking.
  *  Returns { ok, reason, type }. */
-export function prospectDecision({ companyName, companyDomain, industry, title, departments, aiType }, ctx, inferType) {
+/** Employer type from industry codes, when Lusha provides them. null = no codes to go on. */
+export function typeFromCodes(naics = [], sic = []) {
+  for (const c of naics) {
+    if (/^62221/.test(c)) return T.BH;
+    if (/^622/.test(c)) return T.HS;
+    if (/^621112|^62142/.test(c)) return T.BH;
+    if (/^6211/.test(c)) return T.PG;
+    if (/^621493/.test(c)) return T.UC;
+    if (/^62149[18]/.test(c)) return T.CHC;
+  }
+  for (const c of sic) {
+    if (c === '8063') return T.BH;
+    if (c === '8062' || c === '8069') return T.HS;
+    if (c === '8011') return T.PG;
+    if (c === '8093') return T.UC;
+  }
+  return naics.length || sic.length ? T.OTHER : null; // has codes, none of them patient care
+}
+
+export function prospectDecision({ companyName, companyDomain, industry, title, departments, aiType, naics, sic }, ctx, inferType) {
   const s = ctx.settings;
   const pseudo = { name: companyName, norm_name: normName(companyName), domain: normDomain(companyDomain) };
-  let type = inferType(companyName, industry);
+  const byCodes = typeFromCodes(naics, sic);
+  let type = byCodes || inferType(companyName, industry);
   if (type === T.UNKNOWN && aiType) type = aiType;
+  // A staffing-firm name still wins over codes.
+  if (inferType(companyName, '') === T.SA) type = T.SA;
   if (protectionMatch(pseudo, ctx)) return { ok: false, reason: 'Skip: current client', type };
   if (pseudo.domain && ctx.suppressedDomains.has(pseudo.domain)) return { ok: false, reason: 'Skip: suppressed domain', type };
   if (type === T.SA || ctx.excludeKeywords.some((k) => pseudo.norm_name.includes(normName(k)))) return { ok: false, reason: 'Skip: staffing firm', type };
