@@ -55,7 +55,9 @@ async function lushaProspecting(settings, ctx, sum) {
       if (!c.lushaId || titleRank(c.title, ctx) >= 99) continue;
       const pseudo = { name: c.companyName, norm_name: normName(c.companyName), domain: normDomain(c.companyDomain) };
       if (protectionMatch(pseudo, ctx)) { sum.skippedProtected++; continue; }
-      if (inferType(c.companyName, c.industry) === T.SA || ctx.excludeKeywords.some((k) => pseudo.norm_name.includes(normName(k)))) { sum.skippedExcluded++; continue; }
+      const type = inferType(c.companyName, c.industry);
+      if (type === T.SA || ctx.excludeKeywords.some((k) => pseudo.norm_name.includes(normName(k)))) { sum.skippedExcluded++; continue; }
+      if (!settings.types.includes(type)) { sum.skippedNotTarget++; continue; } // vendors, tech, pharma, unknown: no credits
       if (pseudo.domain && ctx.suppressedDomains.has(pseudo.domain)) continue;
       if (await one('SELECT 1 FROM contacts WHERE lusha_id = $1', [c.lushaId])) continue;
       const known = pseudo.domain && await one(`SELECT e.id FROM employers e JOIN contacts ct ON ct.employer_id = e.id WHERE e.domain = $1 AND ct.email IS NOT NULL AND NOT ct.bad LIMIT 1`, [pseudo.domain]);
@@ -141,7 +143,7 @@ export async function lushaFillContacts(settings, ctx, sum, onlyIds = null) {
 
 export async function runDiscovery({ trigger = 'schedule' } = {}) {
   const settings = await getSettings();
-  const sum = { trigger, pmListings: 0, newEmployers: 0, newOpenings: 0, newContacts: 0, merged: 0, lushaPreviews: 0, lushaRevealed: 0, skippedProtected: 0, skippedExcluded: 0, enrolled: 0, notes: [], touched: new Set() };
+  const sum = { trigger, pmListings: 0, newEmployers: 0, newOpenings: 0, newContacts: 0, merged: 0, lushaPreviews: 0, lushaRevealed: 0, skippedProtected: 0, skippedExcluded: 0, skippedNotTarget: 0, enrolled: 0, notes: [], touched: new Set() };
   let ctx = await loadContext();
 
   // 1. PracticeMatch automated monitor (returns nothing until configured; imports run separately)

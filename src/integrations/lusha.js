@@ -91,6 +91,40 @@ function collectContacts(json) {
   return out;
 }
 
+function companyInclude(L) {
+  const inc = {};
+  if (L.mainIndustriesIds?.length) inc.mainIndustriesIds = L.mainIndustriesIds.map(Number);
+  if (L.subIndustriesIds?.length) inc.subIndustriesIds = L.subIndustriesIds.map(Number);
+  if (L.industriesLabels?.length) inc.industriesLabels = L.industriesLabels;
+  return inc;
+}
+
+/** Find Lusha's industry filter values on this account. Tries the known filter endpoints and returns
+ *  every industry entry it can find as { id, name, parentId?, parentName? }. */
+export async function industryValues() {
+  const paths = ['/v3/companies/prospecting/filters/industries', '/v3/companies/prospecting/filters/mainIndustries',
+    '/v3/companies/prospecting/filters/industriesLabels', '/prospecting/filters/companies/industries_labels'];
+  const tried = [];
+  for (const p of paths) {
+    try {
+      const json = await call('GET', p);
+      const out = [];
+      const walk = (v, parent) => {
+        if (Array.isArray(v)) return v.forEach((x) => walk(x, parent));
+        if (!v || typeof v !== 'object') return;
+        const name = v.name || v.label || v.value || v.main_industry || v.mainIndustry;
+        const id = v.id ?? v.main_industry_id ?? v.mainIndustryId ?? v.sub_industry_id ?? v.subIndustryId;
+        if (name && id != null) out.push({ id, name, parentId: parent?.id ?? null, parentName: parent?.name ?? null });
+        for (const k of Object.keys(v)) if (Array.isArray(v[k])) walk(v[k], name && id != null ? { id, name } : parent);
+      };
+      walk(json, null);
+      if (out.length) return { endpoint: p, values: out };
+      tried.push(`${p}: no values`);
+    } catch (e) { tried.push(`${p}: ${e.message}`); }
+  }
+  return { endpoint: null, values: [], tried };
+}
+
 /** Prospecting search for decision-makers at US healthcare employers. Returns previews (no emails). */
 export async function prospectContacts(settings, page) {
   const L = settings.lusha;
@@ -99,7 +133,7 @@ export async function prospectContacts(settings, page) {
     pagination: { page, size: Math.min(100, Math.max(10, L.pageSize)) },
     filters: {
       contacts: { include: { jobTitles: L.jobTitles, locations, existingDataPoints: ['work_email'] } },
-      companies: { include: { industriesLabels: L.industriesLabels } },
+      companies: { include: companyInclude(L) },
     },
     // Plan-dependent options. If Lusha rejects one for this plan, retry without options;
     // contacts-per-company is also enforced on our side, and DNC phones are never used (email only).

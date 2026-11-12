@@ -2,12 +2,12 @@
 import { q, one, logEvent, kvGet } from './db.js';
 import { cfg, integrations } from './config.js';
 import { getSettings, saveSettings, DEFAULT_TEMPLATES, EMPLOYER_TYPES } from './settings.js';
-import { loadContext, requalify, requalifyAll, rankContacts, isUsable } from './engine/qualify.js';
+import { loadContext, requalify, requalifyAll, rankContacts, isUsable, protectionMatch } from './engine/qualify.js';
 import { compose } from './engine/compose.js';
 import { enroll, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
 import { runDiscovery, importListings, lushaFillContacts } from './engine/discovery.js';
 import { pollReplies, referralFrom } from './engine/replies.js';
-import { addContact } from './engine/ingest.js';
+import { addContact, inferType } from './engine/ingest.js';
 import { runJob } from './scheduler.js';
 import * as outlook from './integrations/outlook.js';
 import * as lusha from './integrations/lusha.js';
@@ -256,7 +256,7 @@ export const routes = {
     const protectedAccounts = await q('SELECT id, name, domain FROM protected_accounts ORDER BY name');
     const suppressions = await q('SELECT id, kind, value, reason, created_at FROM suppressions ORDER BY created_at DESC LIMIT 500');
     return {
-      settings: await getSettings(), defaults: { templates: DEFAULT_TEMPLATES }, types: Object.values(EMPLOYER_TYPES).filter((t) => t !== EMPLOYER_TYPES.UNKNOWN && t !== EMPLOYER_TYPES.SA),
+      settings: await getSettings(), defaults: { templates: DEFAULT_TEMPLATES }, types: Object.values(EMPLOYER_TYPES).filter((t) => ![EMPLOYER_TYPES.UNKNOWN, EMPLOYER_TYPES.SA, EMPLOYER_TYPES.OTHER].includes(t)),
       protectedAccounts, suppressions,
       integrations: { ...integrations(), outlook: await outlook.connection(), redirectUri: outlook.redirectUri(), dryRun: cfg.dryRun, scheduler: cfg.schedulerEnabled, timezone: cfg.timezone, sendBlocked: await kvGet('send_blocked') },
       credits: await lusha.creditsUsed(),
@@ -310,10 +310,21 @@ export const routes = {
     return { ok: true, message: `Test email sent to ${to}.` };
   },
 
+  'GET /api/lusha/industries': async () => lusha.industryValues(),
+
   'GET /api/lusha/check': async () => {
     const s = await getSettings();
-    const r = await lusha.prospectContacts({ ...s, lusha: { ...s.lusha, pageSize: 10 } }, 0);
-    return { ok: true, previews: r.results.slice(0, 10), pagination: r.pagination, rawKeys: Object.keys(r.raw || {}), credits: await lusha.creditsUsed() };
+    const r = await lusha.prospectContacts({ ...s, lusha: { ...s.lusha, pageSize: 25 } }, 0);
+    const ctx = await loadContext();
+    const previews = r.results.slice(0, 25).map((p) => {
+      const type = inferType(p.companyName, p.industry);
+      const pseudo = { norm_name: normName(p.companyName), domain: normDomain(p.companyDomain) };
+      const decision = protectionMatch(pseudo, ctx) ? 'Skip: current client'
+        : type === EMPLOYER_TYPES.SA || ctx.excludeKeywords.some((k) => pseudo.norm_name.includes(normName(k))) ? 'Skip: staffing firm'
+          : !s.types.includes(type) ? 'Skip: not a provider employer' : 'Would unlock';
+      return { ...p, type, decision };
+    });
+    return { ok: true, previews, pagination: r.pagination, rawKeys: Object.keys(r.raw || {}), credits: await lusha.creditsUsed() };
   },
 };
 

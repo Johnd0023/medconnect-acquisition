@@ -7,6 +7,7 @@ export const EMPLOYER_TYPES = {
   CHC: 'Community health center',
   BH: 'Behavioral health',
   SA: 'Staffing / recruiting firm',
+  OTHER: 'Not a provider employer (vendor, tech, pharma, other)',
   UNKNOWN: 'Unknown',
 };
 
@@ -92,14 +93,16 @@ export const DEFAULT_SETTINGS = {
     dailyRevealLimit: 40,      // max contacts revealed (credit spend) per day
     monthlyCreditBudget: 1500,
     jobTitles: ['Physician Recruiter', 'Provider Recruiter', 'Director of Provider Recruitment', 'Talent Acquisition', 'Medical Staff Recruiter', 'Practice Administrator', 'Practice Manager'],
-    industriesLabels: ['Hospitals and Health Care', 'Medical Practices', 'Mental Health Care'],
+    industriesLabels: [],      // Lusha industry labels (optional; use Settings → Lusha → Find industry IDs)
+    mainIndustriesIds: [],
+    subIndustriesIds: [],
     states: [],                // empty = nationwide
   },
 
   // --- targeting ---
   specialties: ['Hospitalist', 'Emergency Medicine', 'Family Medicine', 'Internal Medicine', 'Psychiatry', 'Anesthesiology', 'OB/GYN', 'Urgent Care', 'Cardiology', 'Pediatrics', 'Radiology', 'Neurology', 'Gastroenterology', 'Oncology', 'General Surgery', 'Orthopedic Surgery', 'Pulmonology', 'Nephrology', 'Urology', 'Dermatology'],
   types: [EMPLOYER_TYPES.HS, EMPLOYER_TYPES.PG, EMPLOYER_TYPES.UC, EMPLOYER_TYPES.CHC, EMPLOYER_TYPES.BH],
-  excludeKeywords: 'staffing\nlocum\nlocums\nrecruiting\nrecruitment firm\nsearch firm\nsearch partners\nplacement\ntalent solutions',
+  excludeKeywords: 'staffing\nlocum\nlocums\nrecruiting\nrecruitment firm\nsearch firm\nsearch partners\nplacement\ntalent solutions\nshifts\nworkforce solutions',
   titlePriority: 'provider recruit\nphysician recruit\nrecruit\ntalent acquisition\nhuman resources\npractice administrator\npractice manager\nmedical staff\nchief operating\noperations',
 
   // --- sender & compliance ---

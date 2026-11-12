@@ -6,15 +6,30 @@ import { EMPLOYER_TYPES as T } from '../settings.js';
 
 const SRC_LABEL = { PM: 'PracticeMatch', Lusha: 'Lusha', Referral: 'a referral', Manual: 'manual entry' };
 
+const NON_PROVIDER = /software|information technology|it services|internet|computer|medical (equipment|device)|biotech|pharmaceutical|research|insurance|financial|environmental|manufacturing|retail|wholesale|consulting|marketing|telecommunication|education|government|non-?profit organization management|staffing|recruiting/;
+
 export function inferType(name, industry = '') {
-  const s = `${name} ${industry}`.toLowerCase();
-  if (/staffing|locum|recruit(ing|ment) (firm|partners|group|solutions)|search (firm|partners)|placement|talent solutions|clinician search|physician search/.test(s)) return T.SA;
+  const n = (name || '').toLowerCase();
+  const ind = (industry || '').toLowerCase();
+  const s = `${n} ${ind}`;
+  if (/staffing|locum|recruit(ing|ment)\b|search (firm|partners)|placement|talent solutions|clinician search|physician search|\bshifts\b|directshifts/.test(s)) return T.SA;
+  if (ind) {
+    // Lusha's industry label is more reliable than the company name.
+    if (/mental health|behavioral/.test(ind)) return T.BH;
+    if (/hospital/.test(ind)) {
+      if (/urgent care|walk-?in|immediate care/.test(n)) return T.UC;
+      if (/community health|fqhc/.test(n)) return T.CHC;
+      if (/medical group|physicians|associates|clinic|practice|partners|hospitalists/.test(n) && !/hospital|medical center|health system/.test(n)) return T.PG;
+      return T.HS;
+    }
+    if (/medical practice|physicians|ambulatory/.test(ind)) return /urgent care|walk-?in/.test(n) ? T.UC : T.PG;
+    if (NON_PROVIDER.test(ind)) return T.OTHER;
+  }
   if (/behavioral|psychiatr|mental health|addiction|recovery center/.test(s)) return T.BH;
   if (/community health|fqhc|federally qualified|health center\b/.test(s)) return T.CHC;
   if (/urgent care|walk-?in|immediate care|express care|convenient care|ambulatory surgery|surgery center/.test(s)) return T.UC;
-  if (/hospital|medical center|health system|healthcare system|regional health|health network|\bhealth$|memorial|baptist health|methodist|presbyterian/.test(s)) return T.HS;
-  if (/medical group|physicians|physician partners|associates|clinic|practice|family medicine|pediatrics|cardiology|orthopa?edic|anesthesia|hospitalists|emergency physicians|women'?s health|imaging|internal medicine|medical practices/.test(s)) return T.PG;
-  if (/hospitals and health care|hospital & health care/.test(s)) return T.HS;
+  if (/hospital|medical center|health system|healthcare system|regional health|health network|memorial|baptist health|methodist|presbyterian/.test(s)) return T.HS;
+  if (/medical group|physicians|physician partners|associates|clinic|practice|family medicine|pediatrics|cardiology|orthopa?edic|anesthesia|hospitalists|emergency physicians|women'?s health|imaging|internal medicine/.test(s)) return T.PG;
   return T.UNKNOWN;
 }
 
