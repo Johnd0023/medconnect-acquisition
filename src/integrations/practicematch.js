@@ -132,7 +132,7 @@ function toRow(job) {
  * Daily scan. Reads today's in-house postings on the selected boards, then opens only job IDs not already
  * on file. Polite pacing between requests. Returns rows for ingestListing().
  */
-export async function fetchApprovedListings(settings, log = () => {}) {
+export async function fetchApprovedListings(settings, log = () => {}, onBatch = null) {
   const P = settings.practicematch || {};
   if (!P.enabled) return [];
   const firstRun = !(await q(`SELECT 1 FROM openings WHERE source = 'PM' AND raw ? 'pmCode' LIMIT 1`)).length;
@@ -166,8 +166,11 @@ export async function fetchApprovedListings(settings, log = () => {}) {
       if (job.nonProvider && P.providersOnly) { skipped++; continue; } // only when limited to physicians/APPs
       if (job.employer) rows.push(toRow(job));
     } catch (e) { log(`job ${id}: ${e.message}`); }
+    // Hand jobs over in small batches so they show up in the dashboard while the scan is still running.
+    if (onBatch && rows.length >= 10) { await onBatch(rows.splice(0, rows.length)); }
     await sleep(delay);
   }
+  if (onBatch && rows.length) await onBatch(rows.splice(0, rows.length));
   log(`PracticeMatch: ${ids.length} postings (jobAge=${jobAge}), ${fresh.length} new, ${rows.length} jobs read${skipped ? `, ${skipped} non-provider roles skipped` : ''}`);
   return rows;
 }

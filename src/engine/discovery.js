@@ -167,8 +167,12 @@ export async function lushaFillContacts(settings, ctx, sum, onlyIds = null) {
 export async function runPracticeMatchScan({ requalifyAfter = true, autoEnroll = false } = {}) {
   const settings = await getSettings();
   const logs = [];
-  const rows = await pm.fetchApprovedListings(settings, (m) => { logs.push(m); console.log('[practicematch]', m); });
-  const r = rows.length ? await importListings(rows, 'scan') : { listings: 0, newEmployers: 0, newOpenings: 0, newContacts: 0, merged: 0 };
+  const r = { listings: 0, newEmployers: 0, newOpenings: 0, newContacts: 0, merged: 0 };
+  await pm.fetchApprovedListings(settings, (m) => { logs.push(m); console.log('[practicematch]', m); }, async (batch) => {
+    const b = await importListings(batch, 'scan');
+    for (const k of Object.keys(r)) r[k] += b[k] || 0;
+    console.log(`[practicematch] added ${b.listings} jobs (${r.listings} so far)`);
+  });
   if (requalifyAfter) await requalifyAll();
   let enrolled = 0;
   if (autoEnroll && !settings.supervised && settings.autoEnroll && !settings.paused) {
