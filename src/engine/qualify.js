@@ -42,7 +42,26 @@ function titleVariants(line) {
   return m ? [m[1], m[2]] : [line];
 }
 const LEADERSHIP = new Set(['director', 'vice', 'president', 'head', 'chief', 'officer', 'executive']);
-const containsAll = (have, need) => need.length > 0 && need.every((w) => have.includes(w));
+// Words that may sit inside a phrase without changing its meaning.
+const FILLER = new Set(['provider', 'physician', 'advanced', 'practice', 'senior', 'associate', 'assistant', 'interim', 'regional', 'system', 'medical', 'clinical', 'group', 'and']);
+// Non-clinical functions: a title in one of these is never a target, unless it is also about provider recruiting.
+const NON_TARGET_FUNCTION = /\b(data|technology|technical|information|it|security|cyber|engineering|software|digital|innovation|analytics|automation|marketing|communications|brand|branding|sales|commercial|business development|finance|financial|revenue|accounting|tax|treasury|legal|counsel|compliance|procurement|supply chain|facilities|real estate|construction|research|medical affairs|regulatory|investor|product|strategy)\b/;
+/** True when the phrase's words appear in the title in the same order, with at most one extra word
+ *  between neighbours ("Director of Physician Recruitment" ⊂ "Senior Director of Physician and Provider Recruitment"). */
+const containsAll = (have, need) => {
+  if (!need.length) return false;
+  for (let start = 0; start < have.length; start++) {
+    if (have[start] !== need[0]) continue;
+    let pos = start; let ok = true;
+    for (let k = 1; k < need.length; k++) {
+      const next = have.indexOf(need[k], pos + 1);
+      if (next < 0 || next - pos > 2 || (next - pos === 2 && !FILLER.has(have[pos + 1]))) { ok = false; break; }
+      pos = next;
+    }
+    if (ok) return true;
+  }
+  return false;
+};
 
 // Recruiters for corporate, campus, tech, sales or nursing roles are not who MedConnect needs.
 const NON_CLINICAL_RECRUITING = /executive and corporate|corporate (recruit|talent)|early career|campus|university recruit|employer brand|recruitment marketing|talent (marketing|brand)|technology recruit|tech recruit|\bit recruit|engineering recruit|sales recruit|finance recruit|retail recruit|pharmacy recruit|nurse recruit|nursing recruit|\brn recruit/;
@@ -51,6 +70,7 @@ const NON_CLINICAL_RECRUITING = /executive and corporate|corporate (recruit|tale
 export function titleRank(title, ctx, departments = []) {
   const t = (title || '').toLowerCase();
   if (!t || NON_CLINICAL_RECRUITING.test(t)) return 99;
+  if (NON_TARGET_FUNCTION.test(t) && !/(physician|provider|clinician|advanced practice|\bapp\b|medical staff)[^,;]*recruit|recruit[^,;]*(physician|provider|clinician)/.test(t)) return 99;
   const have = tokens(t);
   // Most specific matching phrase wins (more words = more specific); a leadership title
   // (director, VP, head, chief…) only matches a phrase that is itself a leadership title.

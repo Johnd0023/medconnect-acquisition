@@ -419,7 +419,7 @@ async function renderSettings() {
     ${num("s-lmc", "lusha.maxContactsPerCompany", s.lusha.maxContactsPerCompany, "Contacts per company", "", 1, 5)}
     ${num("s-lrl", "lusha.dailyRevealLimit", s.lusha.dailyRevealLimit, "Contact reveals per day", "Reveals are what spend credits.", 0, 1000)}
     ${num("s-lmb", "lusha.monthlyCreditBudget", s.lusha.monthlyCreditBudget, "Monthly credit budget", "Lusha work stops for the month at this number.", 0, 1000000)}
-    <div class="field"><span style="font-weight:500;font-size:13px">Job titles to search</span><div class="sub">Every title in your four contact priority tiers (Settings → Contact priority). Edit them there.</div></div>
+    <div class="field"><span style="font-weight:500;font-size:13px">Job titles to search</span><div class="sub">Nationwide search uses the titles in these priority tiers (edit titles under Contact priority):</div><div class="checks">${[1, 2, 3, 4].map((n) => `<label><input type="checkbox" data-ptier="${n}" id="pt-${n}" ${(s.lusha.prospectTiers || [1, 2]).includes(n) ? "checked" : ""}>Priority ${n}</label>`).join("")}</div><span class="hint">Priorities 3–4 (operations, executives) are broad titles. They're still used at employers already found on PracticeMatch, but searching them nationwide mostly returns non-provider companies.</span></div>
     <div class="field"><span style="font-weight:500;font-size:13px">Industries</span><div class="sub">${(s.lusha.mainIndustriesIds || []).length + (s.lusha.subIndustriesIds || []).length ? `${(s.lusha.mainIndustriesIds || []).length + (s.lusha.subIndustriesIds || []).length} Lusha industries selected` : (s.lusha.industriesLabels || []).length ? `Labels: ${esc(s.lusha.industriesLabels.join(", "))}` : "No industry filter. The provider-employer guard still applies"}</div><div class="actions"><button class="btn sm" data-act="lushaIndustries">Find industry IDs</button></div><div id="industryOut" hidden></div></div>
     <div class="field"><label for="s-lst">States (blank = nationwide)</label><textarea id="s-lst" data-path="lusha.states" data-kind="list">${esc(s.lusha.states.join("\n"))}</textarea></div>
   </div></section>
@@ -550,8 +550,8 @@ document.addEventListener("click", async (ev) => {
         const out = document.getElementById("lushaOut"); out.hidden = false; out.innerHTML = '<span class="sub">Running a 25-result test search. Nothing is unlocked, so no reveal credits are spent…</span>';
         try {
           const r = await api("/api/lusha/check");
-          const n = r.previews.filter((p) => p.ok).length;
-          out.innerHTML = `<b>Lusha responded.</b> ${r.previews.length} sample prospects out of ${esc(r.pagination.total ?? "?")} matches. <b>${n}</b> pass the provider-employer guard and would be unlocked; the rest are skipped without spending credits.<div class="tablewrap"><table><thead><tr><th>Name</th><th>Title</th><th>Company</th><th>Lusha industry</th><th>Decision</th></tr></thead><tbody>${r.previews.map((p) => `<tr><td>${esc(p.fullName)}</td><td>${esc(p.title)}</td><td>${esc(p.companyName)}<div class="sub mono">${esc(p.companyDomain || "")}</div></td><td>${esc(p.industry || "—")}<div class="sub">${esc(p.type)}</div></td><td><span class="pill ${p.ok ? (p.tier <= 2 ? "p-good" : "p-info") : "p-mute"}">${esc(p.decision)}</span></td></tr>`).join("")}</tbody></table></div><details><summary class="sub" style="cursor:pointer">Raw Lusha result (for troubleshooting)</summary><div class="sub">Industry filter sent: ${esc(JSON.stringify(r.filters))}</div><pre class="mono" style="white-space:pre-wrap;max-height:300px;overflow:auto">${esc(JSON.stringify(r.rawSample, null, 2))}</pre></details>`;
+          const n = r.passed ?? r.previews.filter((p) => p.ok === true).length;
+          out.innerHTML = `<b>Lusha responded.</b> ${r.previews.length} sample prospects out of ${esc(r.pagination.total ?? "?")} matches for ${esc(r.titlesSearched)} titles. <b>${n}</b> pass the provider-employer guard and would be unlocked; the rest are skipped without spending credits.<div class="tablewrap"><table><thead><tr><th>Name</th><th>Title</th><th>Company</th><th>Lusha industry</th><th>Decision</th></tr></thead><tbody>${r.previews.map((p) => `<tr><td>${esc(p.fullName)}</td><td>${esc(p.title)}</td><td>${esc(p.companyName)}<div class="sub mono">${esc(p.companyDomain || "")}</div></td><td>${esc(p.industry || "—")}<div class="sub">${esc(p.type)}</div></td><td><span class="pill ${p.ok ? (p.tier <= 2 ? "p-good" : "p-info") : "p-mute"}">${esc(p.decision)}</span></td></tr>`).join("")}</tbody></table></div><details><summary class="sub" style="cursor:pointer">Raw Lusha result (for troubleshooting)</summary><div class="sub">Industry filter sent: ${esc(JSON.stringify(r.filters))}</div><pre class="mono" style="white-space:pre-wrap;max-height:300px;overflow:auto">${esc(JSON.stringify(r.rawSample, null, 2))}</pre></details>`;
         } catch (e) { out.innerHTML = `<span class="pill p-bad">Lusha error</span> ${esc(e.message)}`; }
         return;
       }
@@ -590,6 +590,10 @@ document.addEventListener("change", async (ev) => {
   if (t.dataset.days) {
     const key = t.dataset.days; const vals = [...document.querySelectorAll(`[data-days="${key}"]:checked`)].map((x) => Number(x.value));
     return saveSetting({ [key]: vals });
+  }
+  if (t.dataset.ptier) {
+    const vals = [...document.querySelectorAll("[data-ptier]:checked")].map((x) => Number(x.dataset.ptier));
+    return saveSetting({ lusha: { prospectTiers: vals.length ? vals : [1] } });
   }
   if (t.dataset.type) {
     const vals = [...document.querySelectorAll("[data-type]:checked")].map((x) => x.dataset.type);

@@ -92,6 +92,7 @@ export const DEFAULT_SETTINGS = {
     maxContactsPerCompany: 2,
     dailyRevealLimit: 40,      // max contacts revealed (credit spend) per day
     monthlyCreditBudget: 1500,
+    prospectTiers: [1, 2],     // tiers searched nationwide (recruiting roles); all tiers are used at employers we already know
     jobTitles: [],             // legacy; the search now uses every title in the four priority tiers
     industriesLabels: [],      // Lusha industry labels (optional; use Settings → Lusha → Find industry IDs)
     mainIndustriesIds: [],

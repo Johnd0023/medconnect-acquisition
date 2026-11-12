@@ -324,7 +324,7 @@ export const routes = {
       const d = prospectDecision(p, ctx, inferType);
       return { ...p, type: d.type, decision: d.reason, ok: d.ok, tier: d.tier };
     });
-    return { ok: true, previews, pagination: r.pagination, rawKeys: Object.keys(r.raw || {}), rawSample: (r.raw?.results || [])[0] || null, filters: { mainIndustriesIds: s.lusha.mainIndustriesIds, subIndustriesIds: s.lusha.subIndustriesIds, industriesLabels: s.lusha.industriesLabels }, credits: await lusha.creditsUsed() };
+    return { ok: true, previews, passed: previews.filter((x) => x.ok).length, titlesSearched: lusha.searchTitles(s).length, pagination: r.pagination, rawKeys: Object.keys(r.raw || {}), rawSample: (r.raw?.results || [])[0] || null, filters: { mainIndustriesIds: s.lusha.mainIndustriesIds, subIndustriesIds: s.lusha.subIndustriesIds, industriesLabels: s.lusha.industriesLabels }, credits: await lusha.creditsUsed() };
   },
 };
 

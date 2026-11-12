@@ -105,13 +105,17 @@ function collectContacts(json) {
 }
 
 /** Every title in the four priority tiers, without the "(CEO)" style abbreviations. */
-export function searchTitles(settings) {
+export function searchTitles(settings, tiers = settings.lusha?.prospectTiers || [1, 2, 3, 4]) {
   const out = [];
-  for (const k of ['tier1', 'tier2', 'tier3', 'tier4']) for (const l of (settings.titleTiers?.[k] || '').split('\n')) {
+  for (const k of tiers.map((n) => `tier${n}`)) for (const l of (settings.titleTiers?.[k] || '').split('\n')) {
     const t = l.replace(/\s*\([^)]*\)\s*$/, '').trim();
     if (t && !out.includes(t)) out.push(t);
   }
   return out.length ? out : (settings.lusha.jobTitles || []);
+}
+
+function excludeNames(settings) {
+  return (settings.doNotProspect || '').split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 100);
 }
 
 function companyInclude(L) {
@@ -156,7 +160,7 @@ export async function prospectContacts(settings, page) {
     pagination: { page, size: Math.min(100, Math.max(10, L.pageSize)) },
     filters: {
       contacts: { include: { jobTitles: searchTitles(settings), locations, existingDataPoints: ['work_email'] } },
-      companies: { include: companyInclude(L) },
+      companies: { include: companyInclude(L), exclude: { names: excludeNames(settings) } },
     },
     // Plan-dependent options. If Lusha rejects one for this plan, retry without options;
     // contacts-per-company is also enforced on our side, and DNC phones are never used (email only).
@@ -166,9 +170,15 @@ export async function prospectContacts(settings, page) {
   try {
     json = await call('POST', '/v3/contacts/prospecting', body);
   } catch (e) {
-    if (!(e instanceof LushaError) || ![400, 403].includes(e.status) || !/plan|support|option|not supported|maxContacts|dnc/i.test(e.message)) throw e;
+    if (!(e instanceof LushaError) || ![400, 403, 422].includes(e.status)) throw e;
+    // Drop plan-dependent extras one at a time (options, then company excludes) and retry.
     delete body.options;
-    json = await call('POST', '/v3/contacts/prospecting', body);
+    try { json = await call('POST', '/v3/contacts/prospecting', body); }
+    catch (e2) {
+      if (!(e2 instanceof LushaError) || ![400, 403, 422].includes(e2.status)) throw e2;
+      delete body.filters.companies.exclude;
+      json = await call('POST', '/v3/contacts/prospecting', body);
+    }
   }
   return { results: collectContacts(json.results ?? json).map(normalizeContact).filter(Boolean), pagination: json.pagination || {}, raw: json };
 }
