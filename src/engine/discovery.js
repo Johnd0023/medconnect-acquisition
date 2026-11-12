@@ -71,7 +71,7 @@ async function lushaProspecting(settings, ctx, sum) {
     // Spend credits only on contacts at employers that pass protection/exclusion, and that we don't already know.
     const picks = [];
     const perCompany = new Map();
-    for (const c of results.sort((a, b) => titleRank(a.title, ctx) - titleRank(b.title, ctx))) {
+    for (const c of results.sort((a, b) => titleRank(a.title, ctx, a.departments) - titleRank(b.title, ctx, b.departments))) {
       if (!c.lushaId) continue;
       const pseudo = { norm_name: normName(c.companyName), domain: normDomain(c.companyDomain) };
       const d = prospectDecision(c, ctx, inferType);
@@ -135,7 +135,7 @@ export async function lushaFillContacts(settings, ctx, sum, onlyIds = null) {
     const previews = await lusha.decisionMakers(batch.map((e) => e.domain));
     const byDomain = new Map();
     for (const p of previews) {
-      if (!p.lushaId || titleRank(p.title, ctx) >= 99) continue;
+      if (!p.lushaId || titleRank(p.title, ctx, p.departments) >= 99) continue;
       const d = normDomain(p.companyDomain);
       if (!d) continue;
       if (!byDomain.has(d)) byDomain.set(d, []);
@@ -143,7 +143,7 @@ export async function lushaFillContacts(settings, ctx, sum, onlyIds = null) {
     }
     const ids = [];
     for (const e of batch) {
-      const best = (byDomain.get(e.domain) || []).sort((a, b) => titleRank(a.title, ctx) - titleRank(b.title, ctx)).slice(0, 2);
+      const best = (byDomain.get(e.domain) || []).sort((a, b) => titleRank(a.title, ctx, a.departments) - titleRank(b.title, ctx, b.departments)).slice(0, 2);
       for (const b of best) if (!(await one('SELECT 1 FROM contacts WHERE lusha_id = $1', [b.lushaId]))) ids.push(b.lushaId);
     }
     const allowed = ids.slice(0, Math.min(budget.todayLeft, budget.monthLeft));

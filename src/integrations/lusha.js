@@ -63,6 +63,7 @@ export function normalizeContact(r) {
     lastName: last,
     fullName: d.fullName || [first, last].filter(Boolean).join(' '),
     title,
+    departments: (typeof jt === 'object' && jt?.departments) || d.departments || [],
     email: best ? (best.email || best.address) : null,
     emailConfidence: best ? (best.confidence || best.emailConfidence || null) : null,
     phone: phone ? phone.number : null,
@@ -101,6 +102,16 @@ function collectContacts(json) {
   };
   walk(json);
   return out;
+}
+
+/** Every title in the four priority tiers, without the "(CEO)" style abbreviations. */
+export function searchTitles(settings) {
+  const out = [];
+  for (const k of ['tier1', 'tier2', 'tier3', 'tier4']) for (const l of (settings.titleTiers?.[k] || '').split('\n')) {
+    const t = l.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out.length ? out : (settings.lusha.jobTitles || []);
 }
 
 function companyInclude(L) {
@@ -144,7 +155,7 @@ export async function prospectContacts(settings, page) {
   const body = {
     pagination: { page, size: Math.min(100, Math.max(10, L.pageSize)) },
     filters: {
-      contacts: { include: { jobTitles: L.jobTitles, locations, existingDataPoints: ['work_email'] } },
+      contacts: { include: { jobTitles: searchTitles(settings), locations, existingDataPoints: ['work_email'] } },
       companies: { include: companyInclude(L) },
     },
     // Plan-dependent options. If Lusha rejects one for this plan, retry without options;

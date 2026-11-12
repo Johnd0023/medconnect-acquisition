@@ -20,22 +20,53 @@ export async function loadContext() {
     suppressedDomains: new Set(supp.filter((s) => s.kind === 'domain').map((s) => normDomain(s.value))),
     excludeKeywords: lines(settings.excludeKeywords).map((k) => k.toLowerCase()),
     doNotProspect: lines(settings.doNotProspect).map((k) => normName(k)).filter(Boolean),
-    titlePriority: lines(settings.titlePriority).map((k) => k.toLowerCase()),
+    titleTiers: ['tier1', 'tier2', 'tier3', 'tier4'].map((k) => lines(settings.titleTiers?.[k]).flatMap(titleVariants).map(tokens)),
+    departments: lines(settings.departments).map((d) => tokens(d)),
   };
 }
 
-// Recruiters who hire corporate, campus, tech or sales staff are not who MedConnect needs.
-const NON_CLINICAL_RECRUITING = /executive and corporate|corporate (recruit|talent)|early career|campus|university recruit|employer brand|recruitment marketing|talent (marketing|brand)|technology recruit|tech recruit|\bit recruit|engineering recruit|sales recruit|finance recruit|retail recruit|pharmacy recruit|nurse recruit|nursing recruit|rn recruit/;
-// Always relevant, whatever the priority list says.
-const CLINICAL_RECRUITING = /(physician|provider|medical staff|clinician|doctor|advanced practice|app\b)[^,;]*(recruit|staffing|sourcing|services)|(recruit|recruitment)[^,;]*(physician|provider|clinician|advanced practice)/;
+const STOP = new Set(['of', 'and', 'the', 'for', 'to', 'in', 'at', '&', '-', 'a']);
+const ABBR = [[/\bvp\b|\bv\.p\./g, 'vice president'], [/\bsvp\b/g, 'senior vice president'], [/\bavp\b/g, 'assistant vice president'], [/\bevp\b/g, 'executive vice president'],
+  [/\bsr\.?\b/g, 'senior'], [/\bdir\.?\b/g, 'director'], [/\bmgr\.?\b/g, 'manager'], [/\bhr\b/g, 'human resources'], [/\bta\b/g, 'talent acquisition'],
+  [/\bapps?\b/g, 'advanced practice'], [/\bceo\b/g, 'chief executive officer'], [/\bcoo\b/g, 'chief operating officer'], [/\bcmo\b/g, 'chief medical officer'],
+  [/\bchro\b/g, 'chief human resources officer'], [/\bcno\b/g, 'chief nursing officer'], [/\bops\b/g, 'operations'], [/\bassoc\.?\b/g, 'associate'],
+  [/\brecruiting\b|\brecruitment\b|\brecruiters?\b/g, 'recruit'], [/\bproviders\b/g, 'provider'], [/\bphysicians\b/g, 'physician']];
+export function tokens(text) {
+  let t = (text || '').toLowerCase().replace(/&/g, ' and ').replace(/[(),/|:]/g, ' ');
+  for (const [re, rep] of ABBR) t = t.replace(re, rep);
+  return t.replace(/[^a-z ]/g, ' ').split(/\s+/).filter((w) => w && !STOP.has(w));
+}
+/** "Chief Executive Officer (CEO)" → both the full title and "CEO". */
+function titleVariants(line) {
+  const m = line.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  return m ? [m[1], m[2]] : [line];
+}
+const LEADERSHIP = new Set(['director', 'vice', 'president', 'head', 'chief', 'officer', 'executive']);
+const containsAll = (have, need) => need.length > 0 && need.every((w) => have.includes(w));
 
-export function titleRank(title, ctx) {
+// Recruiters for corporate, campus, tech, sales or nursing roles are not who MedConnect needs.
+const NON_CLINICAL_RECRUITING = /executive and corporate|corporate (recruit|talent)|early career|campus|university recruit|employer brand|recruitment marketing|talent (marketing|brand)|technology recruit|tech recruit|\bit recruit|engineering recruit|sales recruit|finance recruit|retail recruit|pharmacy recruit|nurse recruit|nursing recruit|\brn recruit/;
+
+/** 1-4 = your priority tiers (1 best), 5 = only the department matches, 99 = not a target contact. */
+export function titleRank(title, ctx, departments = []) {
   const t = (title || '').toLowerCase();
-  if (!t) return 99;
-  if (NON_CLINICAL_RECRUITING.test(t)) return 99;
-  if (CLINICAL_RECRUITING.test(t)) return 0;
-  const i = ctx.titlePriority.findIndex((k) => t.includes(k));
-  return i < 0 ? 99 : i + 1;
+  if (!t || NON_CLINICAL_RECRUITING.test(t)) return 99;
+  const have = tokens(t);
+  // Most specific matching phrase wins (more words = more specific); a leadership title
+  // (director, VP, head, chief…) only matches a phrase that is itself a leadership title.
+  const leader = have.some((w) => LEADERSHIP.has(w));
+  let best = null;
+  ctx.titleTiers.forEach((phrases, i) => {
+    for (const need of phrases) {
+      if (!containsAll(have, need)) continue;
+      if (leader && !need.some((w) => LEADERSHIP.has(w))) continue;
+      if (!best || need.length > best.len || (need.length === best.len && i + 1 < best.tier)) best = { tier: i + 1, len: need.length };
+    }
+  });
+  if (best) return best.tier;
+  const deptTokens = (Array.isArray(departments) ? departments : [departments]).filter(Boolean).map(tokens);
+  if (deptTokens.some((d) => ctx.departments.some((need) => containsAll(d, need)))) return 5;
+  return 99;
 }
 
 export function isUsable(c, ctx) {
@@ -66,7 +97,7 @@ export function onDoNotProspect(normalizedName, ctx) {
 
 /** Decide, before spending any Lusha credits, whether a prospect's company is worth unlocking.
  *  Returns { ok, reason, type }. */
-export function prospectDecision({ companyName, companyDomain, industry, title, aiType }, ctx, inferType) {
+export function prospectDecision({ companyName, companyDomain, industry, title, departments, aiType }, ctx, inferType) {
   const s = ctx.settings;
   const pseudo = { name: companyName, norm_name: normName(companyName), domain: normDomain(companyDomain) };
   let type = inferType(companyName, industry);
@@ -76,10 +107,11 @@ export function prospectDecision({ companyName, companyDomain, industry, title, 
   if (type === T.SA || ctx.excludeKeywords.some((k) => pseudo.norm_name.includes(normName(k)))) return { ok: false, reason: 'Skip: staffing firm', type };
   if (onDoNotProspect(pseudo.norm_name, ctx)) return { ok: false, reason: 'Skip: not a provider (do-not-prospect list)', type };
   if (type === T.OTHER) return { ok: false, reason: 'Skip: not a provider employer', type };
-  if (titleRank(title, ctx) >= 99) return { ok: false, reason: 'Skip: title outside your priority list', type };
+  const tier = titleRank(title, ctx, departments);
+  if (tier >= 99) return { ok: false, reason: 'Skip: title not in your priority tiers', type };
   if (type === T.UNKNOWN) return { ok: false, reason: "Skip: can't confirm it provides patient care", type };
   if (!s.types.includes(type)) return { ok: false, reason: 'Skip: employer type not targeted', type };
-  return { ok: true, reason: 'Would unlock', type };
+  return { ok: true, reason: tier <= 4 ? `Would unlock · Priority ${tier}` : 'Would unlock · department match', type, tier };
 }
 
 export function protectionMatch(emp, ctx) {
