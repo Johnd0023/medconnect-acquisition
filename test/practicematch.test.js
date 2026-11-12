@@ -127,3 +127,40 @@ test('PracticeMatch scan, consolidation and one sequence per contact', async () 
   const td = sent.filter((m) => m.to_email === 'kristen.stumpf@thedacare.org');
   assert.equal(td.length, 1, 'ThedaCare recruiter emailed once');
 });
+
+test('protected-client guardrail blocks every route right before sending', async () => {
+  const { protectedRecipientMatch, loadContext } = await import('../src/engine/qualify.js');
+  await q(`DELETE FROM messages`); await q(`DELETE FROM sequences`);
+  await q(`UPDATE employers SET decision = 'approved'`);
+  // Fresh prospects from three routes
+  const mk = async (name, domain, email, sourceOrg, contactName) => {
+    const e = await one(`INSERT INTO employers (name, norm_name, domain, type, sources, decision) VALUES ($1, lower(regexp_replace($1,'[^A-Za-z0-9 ]',' ','g')), $2, 'Hospital / health system', ARRAY['PM'], 'approved') RETURNING *`, [name, domain]);
+    await q(`INSERT INTO contacts (employer_id, first_name, full_name, email, title, sources) VALUES ($1, $2, $3, $4, 'Physician Recruiter', ARRAY['PM'])`, [e.id, contactName, contactName || name, email]);
+    await q(`INSERT INTO openings (employer_id, source, external_id, role, specialty, city, state, raw, pm_code, contact_email) VALUES ($1,'PM',$2,'Physician','Hospitalist','X','TX',$3::jsonb,$4,$5)`,
+      [e.id, String(Math.floor(Math.random() * 1e9)), JSON.stringify({ employer: sourceOrg || name }), 'OPP' + e.id, email]);
+    return e;
+  };
+  await q(`UPDATE settings SET data = jsonb_set(data, '{companyAddress}', '"100 Main St"')`);
+  const relay = await mk('Northside Columbus Campus', null, 'jdoe@practicematch.com', 'Riverbend Health System - Columbus Campus');
+  const sibling = await mk('Lakeside Clinic', 'lakesideclinic.org', 'amy.lee@riverbendhealth.careers', null, 'Amy');
+  const lusha = await mk('Coastal Medical Center', 'coastalmc.org', 'kim@coastalmc.org', null, 'Kim');
+  const fine = await mk('Unrelated Hospital', 'unrelated.org', 'pat@unrelated.org', null, 'Pat');
+  const { requalifyAll } = await import('../src/engine/qualify.js');
+  await requalifyAll();
+  for (const e of [relay, sibling, lusha, fine]) await enroll(e.id);
+
+  // Clients added to the protected list AFTER outreach was queued
+  await q(`INSERT INTO protected_accounts (name, norm_name, domain) VALUES ('Riverbend Health System','riverbend health system','riverbendhealth.org'), ('Coastal Medical Center','coastal medical center', null)`);
+
+  for (let i = 0; i < 6; i++) await sendTick({ force: true });
+  const sent = await q(`SELECT to_email FROM messages WHERE status = 'sent'`);
+  assert.deepEqual(sent.map((m) => m.to_email), ['pat@unrelated.org'], 'only the unprotected prospect is emailed');
+  for (const e of [relay, sibling, lusha]) {
+    const ev = await one(`SELECT text FROM events WHERE employer_id = $1 AND text LIKE '%BLOCKED%'`, [e.id]);
+    assert.ok(ev, `blocked event recorded for ${e.name}`);
+  }
+  // The same check runs at enrollment
+  const ctx = await loadContext();
+  assert.equal(protectedRecipientMatch({ employer: { norm_name: 'riverbend health system north tower', domain: null } }, ctx), 'Riverbend Health System');
+  assert.equal(protectedRecipientMatch({ employer: { norm_name: 'hospital', domain: null } }, ctx), null, 'generic words never match');
+});

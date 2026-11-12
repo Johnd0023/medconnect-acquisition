@@ -3,7 +3,7 @@
 import { q, one, logEvent, kvGet, kvSet } from '../db.js';
 import { cfg } from '../config.js';
 import { getSettings } from '../settings.js';
-import { loadContext, requalify } from './qualify.js';
+import { loadContext, requalify, protectedRecipientMatch } from './qualify.js';
 import { compose } from './compose.js';
 import * as outlook from '../integrations/outlook.js';
 import { zoned, hhmmToMin, startOfBusinessDay, addSendDays, atLocalTime, randInt, isRelay } from '../util.js';
@@ -13,6 +13,8 @@ export async function enroll(employerId, { by = 'owner' } = {}) {
   const r = await requalify(employerId, ctx);
   if (!r) throw new Error('Employer not found');
   if (r.bucket !== 'ready') throw new Error(`Not ready for outreach: ${r.reasons.join('; ') || r.status}`);
+  const guard = protectedRecipientMatch({ employer: r.employer, contact: r.chosen, contacts: r.contacts, openings: r.openings }, ctx);
+  if (guard) throw new Error(`Protected client "${guard}": outreach is not allowed`);
   const c = r.chosen;
   // One sequence per contact. A PracticeMatch forwarding address counts once per client, a real address once overall.
   const already = isRelay(c.email)
@@ -101,10 +103,23 @@ export async function sendTick({ force = false } = {}) {
   const ctx = await loadContext();
   const r = await requalify(seq.employer_id, ctx);
   const emp = r.employer;
-  if (['protected', 'excluded', 'suppressed'].includes(r.status)) { await stopSequence(emp.id, `Employer is now ${r.status}`); return { sent: false, reason: 'stopped' }; }
+  if (['protected', 'excluded', 'suppressed'].includes(r.status)) {
+    if (r.status === 'protected') await logEvent(emp.id, `Email BLOCKED: ${r.reasons[0] || 'protected client'}`);
+    await stopSequence(emp.id, r.status === 'protected' ? `Blocked before sending: ${r.reasons[0] || 'protected client'}` : `Employer is now ${r.status}`);
+    return { sent: false, reason: r.status === 'protected' ? 'Blocked: protected client' : 'stopped' };
+  }
   const contact = r.contacts.find((c) => c.id === seq.contact_id);
   if (!contact || !contact.email || contact.bad || ctx.suppressedEmails.has(contact.email.toLowerCase())) {
     await stopSequence(emp.id, 'Contact opted out, bounced, or was marked wrong'); return { sent: false, reason: 'stopped' };
+  }
+  // FINAL GUARDRAIL: never email a protected client, whatever the source (PracticeMatch, Lusha, import, manual).
+  // Uses a freshly loaded protected list and every posting behind this contact.
+  const guardCtx = await loadContext();
+  const guard = protectedRecipientMatch({ employer: emp, contact, contacts: r.contacts, openings: r.openings }, guardCtx);
+  if (guard) {
+    await logEvent(emp.id, `Email to ${contact.email} BLOCKED: matches protected client "${guard}"`);
+    await stopSequence(emp.id, `Blocked before sending: protected client "${guard}"`);
+    return { sent: false, reason: `Blocked: protected client ${guard}` };
   }
   const m = compose(emp, contact, r.openings, seq.step, s);
   if (m.missing.length) { await stopSequence(emp.id, `Missing verified fact: ${m.missing.join(', ')}`, 'paused'); return { sent: false, reason: 'paused (missing fact)' }; }

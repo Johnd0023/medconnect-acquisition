@@ -108,6 +108,14 @@ Used under MedConnect's written permission from PracticeMatch for business devel
 
 ---
 
+## Protected-client guardrail (system-wide)
+Every email, from any source (PracticeMatch, Lusha, import, manual), is checked **immediately before sending** against a freshly loaded protected list. It also runs at enrollment and in the queue. An email is blocked if any of these match a protected account:
+- the employer's name (exact, or the protected name inside a longer name: "Riverbend Health System - Columbus Campus") or website, including sibling domains (`commonspirit.org` also covers `commonspirit.careers`),
+- the recipient's email domain,
+- **every job posting behind the contact**: its hiring organization, website and posting contact. This is how PracticeMatch forwarding addresses (`…@practicematch.com`) are checked, by the client behind them.
+
+A blocked email stops the sequence and writes "Email … BLOCKED: matches protected client" to the employer's history. Clients added to the list later are honored at the next send.
+
 ## Reply handling
 
 | Category | What the platform does |

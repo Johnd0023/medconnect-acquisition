@@ -168,9 +168,16 @@ export function prospectDecision({ companyName, companyDomain, industry, title, 
   return { ok: true, reason: tier <= 4 ? `Would unlock · Priority ${tier}` : 'Would unlock · department match', type, tier };
 }
 
+const GENERIC_NAME = new Set(['health', 'healthcare', 'hospital', 'medical', 'medical center', 'clinic', 'physicians', 'medical group', 'health system', 'care']);
+
 export function protectionMatch(emp, ctx) {
   const byName = ctx.protectedByName.get(emp.norm_name);
   if (byName) return byName;
+  // A protected name inside a longer employer name: "Riverbend Health System" ⊂ "Riverbend Health System Columbus Campus"
+  const padded = ' ' + (emp.norm_name || '') + ' ';
+  for (const [pn, name] of ctx.protectedByName) {
+    if (pn.length >= 8 && !GENERIC_NAME.has(pn) && padded.includes(' ' + pn + ' ')) return name;
+  }
   if (emp.domain) {
     const exact = ctx.protectedByDomain.get(normDomain(emp.domain));
     if (exact) return exact;
@@ -184,11 +191,37 @@ export function protectionMatch(emp, ctx) {
   return null;
 }
 
+const isRelayAddr = (e) => /@practicematch\.com$/i.test(e || '');
+
+/**
+ * System-wide protected-client guard. Looks at everything known about who an email is really for:
+ * the employer record, the recipient address (domain and sibling domains), and every job posting behind it
+ * (hiring organization name, website, posting contact). PracticeMatch forwarding addresses are judged by the
+ * client behind them, since the address itself is @practicematch.com.
+ * Returns the matched protected account name, or null.
+ */
+export function protectedRecipientMatch({ employer, contact, contacts = [], openings = [] }, ctx) {
+  const byDomain = (d) => d && (ctx.protectedByDomain.get(normDomain(d)) || ctx.protectedByRoot.get(domainRoot(d)));
+  const hit = employer && protectionMatch(employer, ctx);
+  if (hit) return hit;
+  for (const c of [contact, ...contacts].filter(Boolean)) {
+    if (c.email && !isRelayAddr(c.email)) { const m = byDomain(emailDomain(c.email)); if (m) return m; }
+  }
+  for (const o of openings) {
+    const raw = o.raw || {};
+    const org = raw.employer;
+    if (org) { const m = protectionMatch({ norm_name: normName(org), domain: normDomain(raw.domain || raw.website || '') }, ctx); if (m) return m; }
+    const site = byDomain(raw.domain || raw.website);
+    if (site) return site;
+    if (o.contact_email && !isRelayAddr(o.contact_email)) { const m = byDomain(emailDomain(o.contact_email)); if (m) return m; }
+  }
+  return null;
+}
+
 /** Pure evaluation (no writes). */
 export function evaluate(emp, openings, contacts, seqs, ctx) {
   const s = ctx.settings;
-  const prot = protectionMatch(emp, ctx)
-    || contacts.map((c) => c.email && (ctx.protectedByDomain.get(emailDomain(c.email)) || ctx.protectedByRoot.get(domainRoot(emailDomain(c.email))))).find(Boolean) || null;
+  const prot = protectedRecipientMatch({ employer: emp, contacts, openings }, ctx);
   const chosen = (emp.selected_contact_id && rankContacts(contacts, ctx).find((c) => c.id === emp.selected_contact_id)) || rankContacts(contacts, ctx)[0] || null;
   const open = seqs.find((x) => x.status === 'active' || x.status === 'paused');
   const anySeq = seqs.length > 0;
