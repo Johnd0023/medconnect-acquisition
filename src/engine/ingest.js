@@ -2,35 +2,44 @@
 // with consolidated openings and deduplicated contacts.
 import { q, one, logEvent } from '../db.js';
 import { normDomain, normName, emailDomain, isFreeMail } from '../util.js';
-import { EMPLOYER_TYPES as T } from '../settings.js';
+import { EMPLOYER_TYPES as T, knownProviders } from '../settings.js';
 
 const SRC_LABEL = { PM: 'PracticeMatch', Lusha: 'Lusha', Referral: 'a referral', Manual: 'manual entry' };
 
-const NON_PROVIDER = /software|information technology|it services|internet|computer|medical (equipment|device)|biotech|pharmaceutical|research|insurance|financial|environmental|manufacturing|retail|wholesale|consulting|marketing|telecommunication|education|government|non-?profit organization management|staffing|recruiting/;
+// Industries that are healthcare-adjacent but don't deliver hands-on patient care (or don't hire physicians/NPs/PAs).
+const NON_PROVIDER = /laborator|diagnostic lab|clinical research|contract research|\bcro\b|research|biotech|pharma|drug|medical (equipment|device|supplies)|device|manufactur|software|information technology|it services|internet|computer|data|analytics|insurance|payer|health plan|financial|wholesale|distribution|retail|pharmac|consult|marketing|advertis|staffing|recruit|education|training|government|environmental|telecom|dentist|dental|chiropract|optomet|veterinar|fitness|wellness|spa\b|cosmetic|medical billing|revenue cycle|transcription|e-?learning/;
+// Industries that by themselves confirm hands-on care.
+const CARE_INDUSTRY = /(^|[^a-z])hospitals?($|[^a-z&]|\s*$)|medical practice|physicians?\b|outpatient|ambulatory|urgent care|primary care|mental health|behavioral|psychiatr|community health|public health|nursing (home|facilit)|skilled nursing|rehabilitation hospital|hospice|home health/;
 
 export function inferType(name, industry = '') {
   const n = (name || '').toLowerCase();
   const ind = (industry || '').toLowerCase();
   const s = `${n} ${ind}`;
-  if (/staffing|locum|recruit(ing|ment)\b|search (firm|partners)|placement|talent solutions|clinician search|physician search|\bshifts\b|directshifts/.test(s)) return T.SA;
-  if (ind) {
-    // Lusha's industry label is more reliable than the company name.
-    if (/mental health|behavioral/.test(ind)) return T.BH;
-    if (/hospital/.test(ind)) {
-      if (/urgent care|walk-?in|immediate care/.test(n)) return T.UC;
-      if (/community health|fqhc/.test(n)) return T.CHC;
-      if (/medical group|physicians|associates|clinic|practice|partners|hospitalists/.test(n) && !/hospital|medical center|health system/.test(n)) return T.PG;
-      return T.HS;
-    }
-    if (/medical practice|physicians|ambulatory/.test(ind)) return /urgent care|walk-?in/.test(n) ? T.UC : T.PG;
-    if (NON_PROVIDER.test(ind)) return T.OTHER;
+  if (/staffing|locums?\b|recruit(ing|ment)\b|search (firm|partners)|placement|talent solutions|clinician search|physician search|\bshifts\b/.test(s)) return T.SA;
+
+  // 1. Name evidence that it's a care site (strongest signal).
+  const byName = (() => {
+    if (/behavioral|psychiatr|mental health|addiction treatment|recovery center/.test(n)) return T.BH;
+    if (/community health center|health center\b|fqhc|federally qualified/.test(n)) return T.CHC;
+    if (/urgent care|walk-?in clinic|immediate care|express care|convenient care|minute ?clinic/.test(n)) return T.UC;
+    if (/\bhospitals?\b|medical center|health system|healthcare system|regional health|health network|\bmemorial\b|\bmedical centre\b/.test(n)) return T.HS;
+    if (/medical group|physicians?\b|physician partners|medical associates|\bclinics?\b|family (medicine|practice)|primary care|internal medicine|pediatrics?\b|cardiology|orthopa?edic|anesthesia|hospitalists?|emergency physicians|women'?s health|ob\/?gyn|surgical (associates|group|specialists)|medical practice|health partners|\bmd\b|\bpc\b|\bpa\b/.test(n)) return T.PG;
+    if (knownProviders().some((k) => (' ' + normName(name) + ' ').includes(' ' + k + ' '))) return T.HS;
+    return null;
+  })();
+  if (ind && NON_PROVIDER.test(ind) && !CARE_INDUSTRY.test(ind)) return T.OTHER; // industry says vendor/lab/pharma/etc.
+  if (byName) return byName;
+
+  // 2. A specific care industry (not the broad "Hospitals and Health Care" bucket, which also holds payers and vendors).
+  const broadOnly = /^\s*(hospitals? (and|&) health ?care|health ?care|health, wellness (and|&) fitness|medical)\s*$/.test(ind);
+  if (ind && !broadOnly && CARE_INDUSTRY.test(ind)) {
+    if (/mental health|behavioral|psychiatr/.test(ind)) return T.BH;
+    if (/urgent care|outpatient|ambulatory/.test(ind)) return T.UC;
+    if (/community health|public health/.test(ind)) return T.CHC;
+    if (/medical practice|physicians?|primary care/.test(ind)) return T.PG;
+    return T.HS;
   }
-  if (/behavioral|psychiatr|mental health|addiction|recovery center/.test(s)) return T.BH;
-  if (/community health|fqhc|federally qualified|health center\b/.test(s)) return T.CHC;
-  if (/urgent care|walk-?in|immediate care|express care|convenient care|ambulatory surgery|surgery center/.test(s)) return T.UC;
-  if (/hospital|medical center|health system|healthcare system|regional health|health network|memorial|baptist health|methodist|presbyterian/.test(s)) return T.HS;
-  if (/medical group|physicians|physician partners|associates|clinic|practice|family medicine|pediatrics|cardiology|orthopa?edic|anesthesia|hospitalists|emergency physicians|women'?s health|imaging|internal medicine/.test(s)) return T.PG;
-  return T.UNKNOWN;
+  return T.UNKNOWN; // can't confirm hands-on patient care
 }
 
 /** Find or create an employer. Returns { employer, isNew }. */

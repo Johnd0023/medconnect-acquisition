@@ -14,9 +14,12 @@ export async function loadContext() {
     settings,
     protectedByName: new Map(prot.map((p) => [p.norm_name, p.name])),
     protectedByDomain: new Map(prot.filter((p) => p.domain).map((p) => [normDomain(p.domain), p.name])),
+    // "commonspirit" from commonspirit.org also covers commonspirit.careers and "CommonSpirit Health".
+    protectedByRoot: new Map(prot.filter((p) => p.domain).map((p) => [domainRoot(p.domain), p.name]).filter(([r]) => r && r.length >= 6)),
     suppressedEmails: new Set(supp.filter((s) => s.kind === 'email').map((s) => s.value.toLowerCase())),
     suppressedDomains: new Set(supp.filter((s) => s.kind === 'domain').map((s) => normDomain(s.value))),
     excludeKeywords: lines(settings.excludeKeywords).map((k) => k.toLowerCase()),
+    doNotProspect: lines(settings.doNotProspect).map((k) => normName(k)).filter(Boolean),
     titlePriority: lines(settings.titlePriority).map((k) => k.toLowerCase()),
   };
 }
@@ -41,15 +44,57 @@ export function rankContacts(contacts, ctx) {
     || (({ 'A+': 4, A: 3, 'B+': 2, B: 1 })[b.email_confidence] || 0) - (({ 'A+': 4, A: 3, 'B+': 2, B: 1 })[a.email_confidence] || 0));
 }
 
+const GENERIC_ROOTS = new Set(['health', 'healthcare', 'medical', 'hospital', 'clinic', 'physicians', 'careers', 'mychart', 'gmail', 'outlook', 'hotmail', 'yahoo']);
+export function domainRoot(d) {
+  const parts = (normDomain(d) || '').split('.');
+  if (parts.length < 2) return null;
+  const root = parts[parts.length - 2] === 'co' && parts.length > 2 ? parts[parts.length - 3] : parts[parts.length - 2];
+  return GENERIC_ROOTS.has(root) ? null : root;
+}
+
+export function onDoNotProspect(normalizedName, ctx) {
+  return ctx.doNotProspect.find((k) => normalizedName === k || normalizedName.startsWith(k + ' ') || normalizedName.includes(' ' + k + ' ') || normalizedName.endsWith(' ' + k)) || null;
+}
+
+/** Decide, before spending any Lusha credits, whether a prospect's company is worth unlocking.
+ *  Returns { ok, reason, type }. */
+export function prospectDecision({ companyName, companyDomain, industry, title, aiType }, ctx, inferType) {
+  const s = ctx.settings;
+  const pseudo = { name: companyName, norm_name: normName(companyName), domain: normDomain(companyDomain) };
+  let type = inferType(companyName, industry);
+  if (type === T.UNKNOWN && aiType) type = aiType;
+  if (protectionMatch(pseudo, ctx)) return { ok: false, reason: 'Skip: current client', type };
+  if (pseudo.domain && ctx.suppressedDomains.has(pseudo.domain)) return { ok: false, reason: 'Skip: suppressed domain', type };
+  if (type === T.SA || ctx.excludeKeywords.some((k) => pseudo.norm_name.includes(normName(k)))) return { ok: false, reason: 'Skip: staffing firm', type };
+  if (onDoNotProspect(pseudo.norm_name, ctx)) return { ok: false, reason: 'Skip: not a provider (do-not-prospect list)', type };
+  if (type === T.OTHER) return { ok: false, reason: 'Skip: not a provider employer', type };
+  if (titleRank(title, ctx) >= 99) return { ok: false, reason: 'Skip: title outside your priority list', type };
+  if (type === T.UNKNOWN) return { ok: false, reason: "Skip: can't confirm it provides patient care", type };
+  if (!s.types.includes(type)) return { ok: false, reason: 'Skip: employer type not targeted', type };
+  return { ok: true, reason: 'Would unlock', type };
+}
+
 export function protectionMatch(emp, ctx) {
-  return ctx.protectedByName.get(emp.norm_name) || (emp.domain && ctx.protectedByDomain.get(normDomain(emp.domain))) || null;
+  const byName = ctx.protectedByName.get(emp.norm_name);
+  if (byName) return byName;
+  if (emp.domain) {
+    const exact = ctx.protectedByDomain.get(normDomain(emp.domain));
+    if (exact) return exact;
+    const root = domainRoot(emp.domain);
+    if (root && ctx.protectedByRoot.get(root)) return ctx.protectedByRoot.get(root);
+  }
+  const squashed = (emp.norm_name || '').replace(/ /g, '');
+  for (const [root, name] of ctx.protectedByRoot) {
+    if ((' ' + emp.norm_name + ' ').includes(' ' + root + ' ') || squashed.startsWith(root)) return name;
+  }
+  return null;
 }
 
 /** Pure evaluation (no writes). */
 export function evaluate(emp, openings, contacts, seqs, ctx) {
   const s = ctx.settings;
   const prot = protectionMatch(emp, ctx)
-    || contacts.map((c) => c.email && ctx.protectedByDomain.get(emailDomain(c.email))).find(Boolean) || null;
+    || contacts.map((c) => c.email && (ctx.protectedByDomain.get(emailDomain(c.email)) || ctx.protectedByRoot.get(domainRoot(emailDomain(c.email))))).find(Boolean) || null;
   const chosen = (emp.selected_contact_id && rankContacts(contacts, ctx).find((c) => c.id === emp.selected_contact_id)) || rankContacts(contacts, ctx)[0] || null;
   const open = seqs.find((x) => x.status === 'active' || x.status === 'paused');
   const anySeq = seqs.length > 0;
@@ -60,7 +105,9 @@ export function evaluate(emp, openings, contacts, seqs, ctx) {
   else if (emp.domain && ctx.suppressedDomains.has(normDomain(emp.domain))) { status = 'suppressed'; reasons = ['Domain is on the suppression list']; }
   else {
     const kw = ctx.excludeKeywords.find((k) => emp.norm_name.includes(normName(k)));
+    const dnp = onDoNotProspect(emp.norm_name, ctx);
     if (emp.type === T.SA || kw) { status = 'excluded'; reasons = [`Staffing or recruiting firm${kw ? ` (name contains "${kw}")` : ''}`]; }
+    else if (dnp || emp.type === T.OTHER) { status = 'excluded'; reasons = [dnp ? `Not a provider employer (do-not-prospect list: "${dnp}")` : 'Not a provider employer']; }
     else {
       const active = openings.filter((o) => o.active);
       const restr = active.find((o) => o.restriction);

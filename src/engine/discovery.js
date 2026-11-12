@@ -7,10 +7,29 @@ import { getSettings } from '../settings.js';
 import * as lusha from '../integrations/lusha.js';
 import * as pm from '../integrations/practicematch.js';
 import { ingestListing, ingestLushaContact, addContact, inferType } from './ingest.js';
-import { loadContext, requalify, requalifyAll, titleRank, protectionMatch } from './qualify.js';
+import { loadContext, requalify, requalifyAll, titleRank, prospectDecision } from './qualify.js';
 import { enroll } from './outreach.js';
 import { normName, normDomain } from '../util.js';
+import { classifyEmployer } from '../integrations/ai.js';
 import { EMPLOYER_TYPES as T } from '../settings.js';
+
+/** Fill in a missing industry for prospects whose company the name alone can't place:
+ *  1) Lusha company lookup by domain, 2) optional AI check. Mutates and returns the list. */
+export async function resolveIndustries(prospects) {
+  const unknown = prospects.filter((p) => inferType(p.companyName, p.industry) === T.UNKNOWN && p.companyDomain);
+  if (unknown.length) {
+    try {
+      const found = await lusha.companyIndustries(unknown.map((p) => normDomain(p.companyDomain)));
+      for (const p of unknown) { const ind = found.get(normDomain(p.companyDomain)); if (ind) p.industry = ind; }
+    } catch (e) { /* lookup is best effort; unknown companies are simply skipped */ }
+  }
+  for (const p of prospects) {
+    if (inferType(p.companyName, p.industry) !== T.UNKNOWN) continue;
+    const ai = await classifyEmployer({ name: p.companyName, domain: p.companyDomain, industry: p.industry, context: 'Lusha prospect' });
+    if (ai?.type) p.aiType = ai.type;
+  }
+  return prospects;
+}
 
 export async function importListings(rows, label = 'import') {
   const sum = { listings: rows.length, newEmployers: 0, newOpenings: 0, newContacts: 0, merged: 0, label };
@@ -46,19 +65,22 @@ async function lushaProspecting(settings, ctx, sum) {
     const { results, pagination } = await lusha.prospectContacts(settings, page);
     sum.lushaPreviews += results.length;
     if (!results.length) { page = 0; break; }
+    await resolveIndustries(results);
     page = (pagination.total && (page + 1) * settings.lusha.pageSize >= pagination.total) ? 0 : page + 1;
 
     // Spend credits only on contacts at employers that pass protection/exclusion, and that we don't already know.
     const picks = [];
     const perCompany = new Map();
     for (const c of results.sort((a, b) => titleRank(a.title, ctx) - titleRank(b.title, ctx))) {
-      if (!c.lushaId || titleRank(c.title, ctx) >= 99) continue;
-      const pseudo = { name: c.companyName, norm_name: normName(c.companyName), domain: normDomain(c.companyDomain) };
-      if (protectionMatch(pseudo, ctx)) { sum.skippedProtected++; continue; }
-      const type = inferType(c.companyName, c.industry);
-      if (type === T.SA || ctx.excludeKeywords.some((k) => pseudo.norm_name.includes(normName(k)))) { sum.skippedExcluded++; continue; }
-      if (!settings.types.includes(type)) { sum.skippedNotTarget++; continue; } // vendors, tech, pharma, unknown: no credits
-      if (pseudo.domain && ctx.suppressedDomains.has(pseudo.domain)) continue;
+      if (!c.lushaId) continue;
+      const pseudo = { norm_name: normName(c.companyName), domain: normDomain(c.companyDomain) };
+      const d = prospectDecision(c, ctx, inferType);
+      if (!d.ok) {
+        if (/current client/.test(d.reason)) sum.skippedProtected++;
+        else if (/staffing/.test(d.reason)) sum.skippedExcluded++;
+        else sum.skippedNotTarget++;
+        continue;
+      }
       if (await one('SELECT 1 FROM contacts WHERE lusha_id = $1', [c.lushaId])) continue;
       const known = pseudo.domain && await one(`SELECT e.id FROM employers e JOIN contacts ct ON ct.employer_id = e.id WHERE e.domain = $1 AND ct.email IS NOT NULL AND NOT ct.bad LIMIT 1`, [pseudo.domain]);
       if (known) continue;

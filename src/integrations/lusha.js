@@ -69,12 +69,24 @@ export function normalizeContact(r) {
     companyName: company.name || d.companyName || '',
     companyDomain: normDomain(company.domain || company.fqdn || d.companyDomain || d.fqdn),
     companyId: company.id != null ? String(company.id) : (d.companyId != null ? String(d.companyId) : null),
-    industry: company.industry || company.mainIndustry || d.industry || '',
+    industry: findIndustry(company) || findIndustry(d) || '',
     city: d.location?.city || null,
     state: d.location?.state || null,
     hasEmail: Boolean(best) || (Array.isArray(d.has) ? d.has.includes('emails') : Boolean(d.has?.emails)),
     error: d.error || null,
   };
+}
+/** Collect any industry-like fields (industry, mainIndustry, subIndustry, industries[]…) into one label. */
+export function findIndustry(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  const out = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (!/industr/i.test(k)) continue;
+    if (typeof v === 'string') out.push(v);
+    else if (Array.isArray(v)) v.forEach((x) => out.push(typeof x === 'string' ? x : x?.name || x?.label || x?.value || ''));
+    else if (v && typeof v === 'object') out.push(v.name || v.label || v.value || '');
+  }
+  return [...new Set(out.filter(Boolean))].join(' / ');
 }
 const rankConf = (c) => ({ 'A+': 5, A: 4, 'B+': 3, B: 2, C: 1 })[c] ?? 0;
 
@@ -178,6 +190,22 @@ export async function companyDomains(items) {
     if (!v || typeof v !== 'object') return;
     const domain = normDomain(v.domain || v.fqdn || v.website || v.company?.domain);
     if (v.clientReferenceId != null && domain) { out.set(String(v.clientReferenceId), { domain, name: v.name || v.company?.name || '' }); return; }
+    Object.values(v).forEach(walk);
+  };
+  walk(json.results ?? json);
+  return out;
+}
+
+/** Look up industry labels for companies by domain (for prospects whose results came without one). */
+export async function companyIndustries(domains) {
+  const out = new Map();
+  const list = [...new Set(domains.filter(Boolean))].slice(0, 100);
+  if (!list.length) return out;
+  const json = await call('POST', '/v3/companies/search', { companies: list.map((d) => ({ clientReferenceId: d, domain: d })) });
+  const walk = (v) => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (!v || typeof v !== 'object') return;
+    if (v.clientReferenceId != null) { const ind = findIndustry(v) || findIndustry(v.company || v.data || {}); if (ind) out.set(String(v.clientReferenceId), ind); return; }
     Object.values(v).forEach(walk);
   };
   walk(json.results ?? json);

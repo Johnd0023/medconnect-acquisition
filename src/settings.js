@@ -103,6 +103,10 @@ export const DEFAULT_SETTINGS = {
   specialties: ['Hospitalist', 'Emergency Medicine', 'Family Medicine', 'Internal Medicine', 'Psychiatry', 'Anesthesiology', 'OB/GYN', 'Urgent Care', 'Cardiology', 'Pediatrics', 'Radiology', 'Neurology', 'Gastroenterology', 'Oncology', 'General Surgery', 'Orthopedic Surgery', 'Pulmonology', 'Nephrology', 'Urology', 'Dermatology'],
   types: [EMPLOYER_TYPES.HS, EMPLOYER_TYPES.PG, EMPLOYER_TYPES.UC, EMPLOYER_TYPES.CHC, EMPLOYER_TYPES.BH],
   excludeKeywords: 'staffing\nlocum\nlocums\nrecruiting\nrecruitment firm\nsearch firm\nsearch partners\nplacement\ntalent solutions\nshifts\nworkforce solutions',
+  // Large hospital and physician-group operators whose names don't say "hospital" (always treated as care providers).
+  knownProviders: 'hca healthcare\ntenet healthcare\ncommonspirit\nascension\ntrinity health\nprovidence\nkaiser permanente\nadvocate health\natrium health\nupmc\nintermountain\nbanner health\nsutter health\nbaylor scott and white\nnorthwell\nnyu langone\nmass general brigham\nsanford health\nnovant health\nprisma health\nochsner\ngeisinger\ncorewell health\nbon secours mercy\nmercy\nchristus health\nlifepoint health\nuniversal health services\nencompass health\nselect medical\nardent health\nprime healthcare\nadventhealth\nadventist health\nallina health\nessentia health\natlantic health\nhackensack meridian\nrwjbarnabas\njefferson health\npenn medicine\nyale new haven\nhartford healthcare\nhenry ford health\nohiohealth\nfroedtert\nmulticare\npeacehealth\nlegacy health\nrenown health\nscripps health\nsharp healthcare\nuchealth\nhealthpartners\navera\ngundersen\ncarilion\nsentara\ninova\nmedstar\nwellspan\nchristianacare\nwellstar\npiedmont healthcare\nemory healthcare\nvanderbilt health\nerlanger\nduke health\nunc health\nuva health\nvcu health\ncedars sinai\nstanford health care\nuc health\nmontefiore\nmount sinai\nnewyork presbyterian\nhoag\nmemorialcare\ndignity health\nuniversity hospitals\nbeaumont\nspectrum health\nsaint lukes\nst lukes\nbaptist health\nmethodist\npresbyterian\nmayo clinic\ncleveland clinic\noptum care\nonemedical\none medical\noak street health\nchenmed\ncarbon health\nconcentra\nmedexpress\nfastmed\ncitymd\ngohealth urgent care\nteamhealth\nenvision physician services\nus acute care solutions\nsound physicians\nusap\nus anesthesia partners\nnorthstar anesthesia\nradiology partners',
+  // Healthcare companies that are not provider employers (payers, labs, pharmacies, vendors, health IT, GPOs).
+  doNotProspect: 'cvs health\naetna\nunitedhealth\noptum\nhumana\ncigna\nelevance\nanthem\ncentene\nmolina\nwalgreens\nwalmart\nlabcorp\nquest diagnostics\nvizient\npremier inc\nathenahealth\nepic systems\noracle health\ncerner\nmckesson\ncardinal health\ncencora\namerisourcebergen\nchange healthcare\niqvia\nwep clinical\nmedtronic\ndexcom\nabbott\njohnson and johnson\npfizer\nbaxter\nbecton dickinson\nphilips\nge healthcare\nsiemens healthineers\nteladoc\namwell\nhealthgrades\ndoximity',
   titlePriority: 'provider recruit\nphysician recruit\nrecruit\ntalent acquisition\nhuman resources\npractice administrator\npractice manager\nmedical staff\nchief operating\noperations',
 
   // --- sender & compliance ---
@@ -113,6 +117,12 @@ export const DEFAULT_SETTINGS = {
 };
 
 let cache = null;
+let knownCache = null;
+/** Normalized known-provider names (from settings once loaded, else defaults). */
+export function knownProviders() {
+  if (!knownCache) knownCache = (cache?.knownProviders ?? DEFAULT_SETTINGS.knownProviders).split('\n').map((x) => x.toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return knownCache;
+}
 
 function deepMerge(base, over) {
   if (Array.isArray(base) || typeof base !== 'object' || base === null) return over === undefined ? base : over;
@@ -125,6 +135,7 @@ export async function getSettings() {
   if (cache) return cache;
   const row = await one('SELECT data FROM settings WHERE id = 1');
   cache = deepMerge(DEFAULT_SETTINGS, row?.data || {});
+  knownCache = null;
   return cache;
 }
 
@@ -134,6 +145,7 @@ export async function saveSettings(patch) {
   validate(next);
   await q('UPDATE settings SET data = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(next)]);
   cache = next;
+  knownCache = null;
   return next;
 }
 
@@ -150,4 +162,4 @@ function validate(s) {
   for (const t of ['sendWindowStart', 'sendWindowEnd', 'discoveryTime']) if (!/^\d{1,2}:\d{2}$/.test(s[t])) throw new Error(`${t} must look like 08:30.`);
 }
 
-export function invalidateSettings() { cache = null; }
+export function invalidateSettings() { cache = null; knownCache = null; }

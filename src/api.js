@@ -2,10 +2,10 @@
 import { q, one, logEvent, kvGet } from './db.js';
 import { cfg, integrations } from './config.js';
 import { getSettings, saveSettings, DEFAULT_TEMPLATES, EMPLOYER_TYPES } from './settings.js';
-import { loadContext, requalify, requalifyAll, rankContacts, isUsable, protectionMatch } from './engine/qualify.js';
+import { loadContext, requalify, requalifyAll, rankContacts, isUsable, protectionMatch, prospectDecision } from './engine/qualify.js';
 import { compose } from './engine/compose.js';
 import { enroll, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
-import { runDiscovery, importListings, lushaFillContacts } from './engine/discovery.js';
+import { runDiscovery, importListings, lushaFillContacts, resolveIndustries } from './engine/discovery.js';
 import { pollReplies, referralFrom } from './engine/replies.js';
 import { addContact, inferType } from './engine/ingest.js';
 import { runJob } from './scheduler.js';
@@ -319,15 +319,12 @@ export const routes = {
     const s = await getSettings();
     const r = await lusha.prospectContacts({ ...s, lusha: { ...s.lusha, pageSize: 25 } }, 0);
     const ctx = await loadContext();
+    await resolveIndustries(r.results);
     const previews = r.results.slice(0, 25).map((p) => {
-      const type = inferType(p.companyName, p.industry);
-      const pseudo = { norm_name: normName(p.companyName), domain: normDomain(p.companyDomain) };
-      const decision = protectionMatch(pseudo, ctx) ? 'Skip: current client'
-        : type === EMPLOYER_TYPES.SA || ctx.excludeKeywords.some((k) => pseudo.norm_name.includes(normName(k))) ? 'Skip: staffing firm'
-          : !s.types.includes(type) ? 'Skip: not a provider employer' : 'Would unlock';
-      return { ...p, type, decision };
+      const d = prospectDecision(p, ctx, inferType);
+      return { ...p, type: d.type, decision: d.reason, ok: d.ok };
     });
-    return { ok: true, previews, pagination: r.pagination, rawKeys: Object.keys(r.raw || {}), credits: await lusha.creditsUsed() };
+    return { ok: true, previews, pagination: r.pagination, rawKeys: Object.keys(r.raw || {}), rawSample: (r.raw?.results || [])[0] || null, filters: { mainIndustriesIds: s.lusha.mainIndustriesIds, subIndustriesIds: s.lusha.subIndustriesIds, industriesLabels: s.lusha.industriesLabels }, credits: await lusha.creditsUsed() };
   },
 };
 
