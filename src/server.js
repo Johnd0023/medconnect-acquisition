@@ -45,11 +45,21 @@ async function readBody(req, limit = 5 * 1024 * 1024) {
 }
 
 const loginPage = (msg = '') => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · MedConnect</title>
-<style>body{font:15px/1.5 system-ui,sans-serif;background:#eef2f4;color:#14212b;display:grid;place-items:center;min-height:100vh;margin:0}
-form{background:#fff;border:1px solid #d9e0e5;border-radius:10px;padding:28px;display:flex;flex-direction:column;gap:12px;width:min(340px,90vw)}
-h1{font-size:20px;margin:0}input{padding:9px;border:1px solid #d9e0e5;border-radius:6px;font:inherit}button{padding:9px;border:0;border-radius:6px;background:#1d5d8a;color:#fff;font:inherit;font-weight:600;cursor:pointer}
-.err{color:#b0362d;font-size:14px}</style></head><body><form method="post" action="/login"><h1>MedConnect Client Acquisition</h1>
-<label for="pw">Owner password</label><input id="pw" type="password" name="password" autofocus required>${msg ? `<div class="err">${msg}</div>` : ''}<button>Sign in</button></form></body></html>`;
+<link rel="icon" type="image/png" href="/logo.png">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet">
+<style>*{box-sizing:border-box}body{font:15px/1.5 Inter,system-ui,sans-serif;background:#f0f2f4;color:#0f1115;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}
+.wrap{display:grid;grid-template-columns:1fr 1fr;max-width:860px;width:100%;background:#fff;border:1px solid #dde0e5;border-radius:20px;overflow:hidden;box-shadow:0 10px 40px rgba(15,17,21,.08)}
+.side{background:#0f1115;color:#fff;padding:36px;display:flex;flex-direction:column;justify-content:flex-end;gap:10px;position:relative;overflow:hidden;min-height:340px}
+.side::after{content:"";position:absolute;right:-90px;top:-90px;width:280px;height:280px;border-radius:50%;background:radial-gradient(circle,rgba(26,183,234,.4),rgba(26,183,234,0) 70%)}
+.eyebrow{color:#1ab7ea;font-size:11.5px;font-weight:600;letter-spacing:.2em;text-transform:uppercase}
+.side h2{font:800 30px/1.15 "Plus Jakarta Sans",Inter,sans-serif;margin:0;letter-spacing:-.01em}.side p{color:#c9ced6;margin:0;font-size:14px}
+form{padding:36px;display:flex;flex-direction:column;gap:14px;justify-content:center}
+img{width:220px;height:auto;margin-bottom:8px}label{font-weight:600;font-size:13px}
+input{padding:11px 13px;border:1px solid #dde0e5;border-radius:10px;font:inherit}input:focus{outline:none;border-color:#1ab7ea;box-shadow:0 0 0 3px #e3f6fd}
+button{padding:11px;border:0;border-radius:999px;background:#1ab7ea;color:#fff;font:inherit;font-weight:600;cursor:pointer}button:hover{background:#0e9fd0}
+.err{color:#dc2626;font-size:14px}@media(max-width:700px){.wrap{grid-template-columns:1fr}.side{min-height:0}}</style></head>
+<body><div class="wrap"><div class="side"><span class="eyebrow">Connecting people · Improving healthcare</span><h2>Client Acquisition Platform</h2><p>New healthcare employers, qualified contacts and outreach, in one place.</p></div>
+<form method="post" action="/login"><img src="/logo.png" alt="MedConnect, a healthcare staffing company"><label for="pw">Owner password</label><input id="pw" type="password" name="password" autofocus required>${msg ? `<div class="err">${msg}</div>` : ''}<button>Sign in</button></form></div></body></html>`;
 
 // ---------- router ----------
 const compiled = Object.entries(routes).map(([key, fn]) => {
@@ -67,7 +77,11 @@ const server = http.createServer(async (req, res) => {
       await pool.query('SELECT 1');
       return send(res, 200, { ok: true });
     }
-    if (url.pathname === '/favicon.ico') { res.writeHead(204); return res.end(); }
+    if (url.pathname === '/favicon.ico' || url.pathname === '/logo.png') {
+      const img = await readFile(new URL('../public/logo.png', import.meta.url));
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
+      return res.end(img);
+    }
     if (url.pathname === '/login' && req.method === 'GET') return send(res, 200, loginPage());
     if (url.pathname === '/login' && req.method === 'POST') {
       if (throttled(ip)) return send(res, 429, loginPage('Too many attempts. Try again in 15 minutes.'));
