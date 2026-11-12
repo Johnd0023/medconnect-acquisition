@@ -37,7 +37,8 @@ function throttled(ip) {
 function send(res, status, body, headers = {}) {
   const isJson = typeof body !== 'string';
   res.writeHead(status, { 'Content-Type': isJson ? 'application/json' : 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY', ...headers });
+    'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin', 'X-Frame-Options': 'DENY',
+    'X-Robots-Tag': 'noindex, nofollow', ...headers });
   res.end(isJson ? JSON.stringify(body) : body);
 }
 async function readBody(req, limit = 5 * 1024 * 1024) {
@@ -47,6 +48,7 @@ async function readBody(req, limit = 5 * 1024 * 1024) {
 }
 
 const loginPage = (msg = '') => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · MedConnect</title>
+<meta name="robots" content="noindex, nofollow">
 <link rel="icon" type="image/png" href="/logo.png">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet">
 <style>*{box-sizing:border-box}body{font:15px/1.5 Inter,system-ui,sans-serif;background:#f0f2f4;color:#0f1115;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}
@@ -75,6 +77,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, cfg.appUrl);
   const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
   try {
+    if (url.pathname === '/robots.txt') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('User-agent: *\nDisallow: /\n'); }
     if (url.pathname === '/healthz') {
       await pool.query('SELECT 1');
       return send(res, 200, { ok: true });
