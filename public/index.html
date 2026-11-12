@@ -434,7 +434,7 @@ async function renderSettings() {
   </div></section>
 
   <section class="card"><div class="ch"><h2>Protected accounts</h2><span class="sub">${d.protectedAccounts.length} current clients</span></div><div class="cb grid2">
-    <div class="field"><label for="prot-add">Add clients (one per line: Name | domain)</label><textarea id="prot-add" placeholder="Riverbend Health System | riverbendhealth.org"></textarea><div class="actions"><button class="btn sm primary" data-act="addProtected">Add to protected list</button></div><span class="hint">Matched on name and domain before any outreach and before Lusha credits are spent. Adding a client stops any running sequence.</span></div>
+    <div class="field"><label for="prot-add">Add clients, one per line: <span class="mono">Name | domain.com</span>, or just <span class="mono">domain.com</span></label><textarea id="prot-add" placeholder="Riverbend Health System | riverbendhealth.org"></textarea><div class="actions"><button class="btn sm primary" data-act="addProtected">Add to protected list</button></div><span class="hint">Matched on name and domain before any outreach and before Lusha credits are spent. Adding a client stops any running sequence.</span></div>
     <div class="tablewrap" style="max-height:260px;overflow:auto">${d.protectedAccounts.length ? `<table><tbody>${d.protectedAccounts.map((p) => `<tr><td>${esc(p.name)}</td><td class="mono">${esc(p.domain || "")}</td><td><button class="btn sm" data-delprot="${p.id}">Remove</button></td></tr>`).join("")}</tbody></table>` : '<div class="empty">No protected accounts yet. Add your current clients before going live.</div>'}</div>
   </div></section>
 

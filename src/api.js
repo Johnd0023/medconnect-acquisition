@@ -273,7 +273,10 @@ export const routes = {
     const lines = String(body.text || '').split('\n').map((l) => l.trim()).filter(Boolean);
     let n = 0;
     for (const l of lines) {
-      const [name, domain] = l.split(/[|,\t]/).map((x) => (x || '').trim());
+      let [name, domain] = l.split(/[|,\t]/).map((x) => (x || '').trim());
+      // A bare domain, @domain or email on its own line protects that domain.
+      if (!domain && /^[^\s|]*@?[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(name)) { domain = name.replace(/^.*@/, ''); name = normDomain(domain); }
+      domain = normDomain((domain || '').replace(/^.*@/, ''));
       if (!name) continue;
       await q(`INSERT INTO protected_accounts (name, norm_name, domain) VALUES ($1, $2, $3) ON CONFLICT (norm_name) DO UPDATE SET domain = coalesce(EXCLUDED.domain, protected_accounts.domain)`, [name, normName(name), normDomain(domain)]);
       n++;

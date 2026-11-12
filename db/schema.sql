@@ -197,3 +197,11 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
 );
 
 INSERT INTO settings (id, data) VALUES (1, '{}'::jsonb) ON CONFLICT (id) DO NOTHING;
+
+-- Repair protected accounts entered as a bare domain or @domain (no "Name | domain").
+UPDATE protected_accounts
+   SET domain = lower(regexp_replace(name, '^.*@', '')),
+       name = lower(regexp_replace(name, '^.*@', '')),
+       norm_name = regexp_replace(lower(regexp_replace(name, '^.*@', '')), '[^a-z0-9 ]', ' ', 'g')
+ WHERE domain IS NULL AND name ~* '^[^ ]*@?[a-z0-9-]+(\.[a-z0-9-]+)+$'
+   AND NOT EXISTS (SELECT 1 FROM protected_accounts p2 WHERE p2.norm_name = regexp_replace(lower(regexp_replace(protected_accounts.name, '^.*@', '')), '[^a-z0-9 ]', ' ', 'g') AND p2.id <> protected_accounts.id);

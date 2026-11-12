@@ -48,7 +48,8 @@ export function protectionMatch(emp, ctx) {
 /** Pure evaluation (no writes). */
 export function evaluate(emp, openings, contacts, seqs, ctx) {
   const s = ctx.settings;
-  const prot = protectionMatch(emp, ctx);
+  const prot = protectionMatch(emp, ctx)
+    || contacts.map((c) => c.email && ctx.protectedByDomain.get(emailDomain(c.email))).find(Boolean) || null;
   const chosen = (emp.selected_contact_id && rankContacts(contacts, ctx).find((c) => c.id === emp.selected_contact_id)) || rankContacts(contacts, ctx)[0] || null;
   const open = seqs.find((x) => x.status === 'active' || x.status === 'paused');
   const anySeq = seqs.length > 0;
