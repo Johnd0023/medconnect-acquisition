@@ -108,6 +108,14 @@ Used under MedConnect's written permission from PracticeMatch for business devel
 
 ---
 
+## Several contacts at one client
+When a client's postings list different recruiters (e.g. one for Family Medicine, another for Cardiology), every posting contact is ticked automatically (up to *Max contacts per client*). In the employer profile you can untick or add contacts. Settings → Sending limits → *When a client has several contacts*:
+- **Separate** (default): each contact gets their own sequence about their own postings.
+- **Together**: one email (and follow-ups) addressed to all of them.
+- **Only the best contact**.
+
+Any human reply from one contact stops follow-ups to all of them. An opt-out, bounce or "wrong person" only removes that person (from a shared email they're dropped and the others continue).
+
 ## Protected-client guardrail (system-wide)
 Every email, from any source (PracticeMatch, Lusha, import, manual), is checked **immediately before sending** against a freshly loaded protected list. It also runs at enrollment and in the queue. An email is blocked if any of these match a protected account:
 - the employer's name (exact, or the protected name inside a longer name: "Riverbend Health System - Columbus Campus") or website, including sibling domains (`commonspirit.org` also covers `commonspirit.careers`),

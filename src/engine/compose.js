@@ -18,7 +18,8 @@ export function fieldsFor(emp, contact, openings, settings) {
   if (o) {
     f.role = o.role || '';
     f.specialty = o.specialty || '';
-    f.more_openings = active.length > 1 ? ` (one of ${active.length} provider openings we saw listed)` : '';
+    const list = mine.length ? mine : active;
+    f.more_openings = list.length > 1 ? ` (one of ${list.length} openings we saw listed)` : '';
     f.signal_line = `the ${o.specialty} ${o.role} opening in ${o.city || emp.city || 'your area'}`;
     f.signal_subject = `${o.specialty} ${o.role} search at ${emp.name}`;
   } else {

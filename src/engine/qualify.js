@@ -218,11 +218,27 @@ export function protectedRecipientMatch({ employer, contact, contacts = [], open
   return null;
 }
 
+/** Contacts to email at this employer: the owner's picks, or every posting contact, or the single best contact. */
+export function selectedContacts(emp, contacts, openings, ctx) {
+  const ranked = rankContacts(contacts, ctx);
+  const max = Math.max(1, ctx.settings.maxContactsPerEmployer || 3);
+  if (ctx.settings.multiContact === 'single') {
+    const pick = (emp.selected_contact_ids || [])[0] || emp.selected_contact_id;
+    return [ranked.find((c) => c.id === pick) || ranked[0]].filter(Boolean);
+  }
+  if (emp.selected_contact_ids?.length) return emp.selected_contact_ids.map((id) => ranked.find((c) => c.id === id)).filter(Boolean).slice(0, max);
+  if (emp.selected_contact_id) { const c = ranked.find((x) => x.id === emp.selected_contact_id); if (c) return [c]; }
+  const posting = new Set(openings.filter((o) => o.active && o.contact_email).map((o) => o.contact_email.toLowerCase()));
+  const owners = ranked.filter((c) => posting.has((c.email || '').toLowerCase()));
+  return (owners.length ? owners : ranked.slice(0, 1)).slice(0, max);
+}
+
 /** Pure evaluation (no writes). */
 export function evaluate(emp, openings, contacts, seqs, ctx) {
   const s = ctx.settings;
   const prot = protectedRecipientMatch({ employer: emp, contacts, openings }, ctx);
-  const chosen = (emp.selected_contact_id && rankContacts(contacts, ctx).find((c) => c.id === emp.selected_contact_id)) || rankContacts(contacts, ctx)[0] || null;
+  const selected = selectedContacts(emp, contacts, openings, ctx);
+  const chosen = selected[0] || null;
   const open = seqs.find((x) => x.status === 'active' || x.status === 'paused');
   const anySeq = seqs.length > 0;
 
@@ -270,7 +286,7 @@ export function evaluate(emp, openings, contacts, seqs, ctx) {
   else if (score >= s.threshold) bucket = 'ready';
   else { bucket = 'review'; reasons = [...reasons, `Score ${score} is below the auto-approve threshold of ${s.threshold}`]; }
 
-  return { status, reasons, score, bucket, chosen };
+  return { status, reasons, score, bucket, chosen, selected };
 }
 
 export async function requalify(employerId, ctx) {

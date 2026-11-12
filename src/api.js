@@ -2,7 +2,7 @@
 import { q, one, logEvent, kvGet } from './db.js';
 import { cfg, integrations } from './config.js';
 import { getSettings, saveSettings, DEFAULT_TEMPLATES, EMPLOYER_TYPES } from './settings.js';
-import { loadContext, requalify, requalifyAll, rankContacts, isUsable, protectionMatch, prospectDecision } from './engine/qualify.js';
+import { loadContext, requalify, requalifyAll, rankContacts, isUsable, protectionMatch, prospectDecision, selectedContacts } from './engine/qualify.js';
 import { compose } from './engine/compose.js';
 import { enroll, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
 import { runDiscovery, importListings, lushaFillContacts, resolveIndustries, runPracticeMatchScan } from './engine/discovery.js';
@@ -22,8 +22,9 @@ async function employerRow(e, ctx) {
     q('SELECT * FROM openings WHERE employer_id = $1 AND active ORDER BY posted_at DESC NULLS LAST', [e.id]),
     q('SELECT * FROM contacts WHERE employer_id = $1', [e.id]),
   ]);
-  const ranked = rankContacts(contacts, ctx);
-  const chosen = ranked.find((c) => c.id === e.selected_contact_id) || ranked[0] || null;
+  const openingsAll = await q('SELECT * FROM openings WHERE employer_id = $1', [e.id]);
+  const sel = selectedContacts(e, contacts, openingsAll, ctx);
+  const chosen = sel[0] || null;
   const seq = await one(`SELECT s.*, c.full_name AS contact_name, c.email AS contact_email FROM sequences s JOIN contacts c ON c.id = s.contact_id
                          WHERE s.employer_id = $1 ORDER BY s.started_at DESC LIMIT 1`, [e.id]);
   return {
@@ -32,7 +33,7 @@ async function employerRow(e, ctx) {
     firstSeen: e.first_seen, lastSignal: e.last_signal,
     openings: openings.map((o) => ({ specialty: o.specialty, role: o.role, postedAt: o.posted_at })),
     openingCount: openings.length,
-    contact: chosen ? { id: chosen.id, name: chosen.full_name, title: chosen.title, email: chosen.email } : null,
+    contact: chosen ? { id: chosen.id, name: chosen.full_name, title: chosen.title, email: chosen.email, more: Math.max(0, sel.length - 1) } : null,
     sequence: seq ? { status: seq.status, step: seq.step, nextAt: seq.next_at, stopReason: seq.stop_reason, replied: seq.replied, contactName: seq.contact_name } : null,
   };
 }
@@ -81,20 +82,39 @@ export const routes = {
       q('SELECT * FROM replies WHERE employer_id = $1 ORDER BY received_at', [e.id]),
       q('SELECT at, text FROM events WHERE employer_id = $1 ORDER BY at DESC LIMIT 100', [e.id]),
     ]);
-    const ranked = rankContacts(contacts, ctx);
-    const open = seqs.find((x) => x.status === 'active' || x.status === 'paused');
-    const chosen = open ? contacts.find((c) => c.id === open.contact_id) : (ranked.find((c) => c.id === e.selected_contact_id) || ranked[0] || null);
-    const preview = chosen ? compose(e, chosen, openings, open ? open.step : 0, s) : null;
+    const mode = s.multiContact || 'separate';
+    const selected = selectedContacts(e, contacts, openings, ctx);
+    const inSeq = new Map();
+    for (const q2 of seqs) for (const cid of [q2.contact_id, ...(q2.cc_contact_ids || [])]) if (!inSeq.has(cid)) inSeq.set(cid, q2);
+    const name = (c) => c.full_name || c.email;
+    // Previews: the next email of each running sequence, or what enrolling would send to the selected contacts
+    const previews = [];
+    const running = seqs.filter((x) => x.status === 'active' || x.status === 'paused');
+    const group = (list) => { const n = list.map((c) => c.first_name).filter(Boolean); return n.length === list.length ? (n.length === 2 ? n.join(' and ') : `${n.slice(0, -1).join(', ')} and ${n.at(-1)}`) : 'there'; };
+    if (running.length) {
+      for (const sq of running) {
+        const list = [sq.contact_id, ...(sq.cc_contact_ids || [])].map((id) => contacts.find((c) => c.id === id)).filter(Boolean);
+        const who = list.length > 1 ? { ...list[0], email: null, first_name: group(list) } : list[0];
+        previews.push({ to: list.map((c) => c.email).join(', '), names: list.map(name).join(', '), status: sq.status, nextAt: sq.next_at, stopReason: sq.stop_reason, ...compose(e, who, openings, sq.step, s) });
+      }
+    } else if (selected.length) {
+      const fresh = selected.filter((c) => !inSeq.has(c.id));
+      if (mode === 'together' && fresh.length > 1) previews.push({ to: fresh.map((c) => c.email).join(', '), names: fresh.map(name).join(', '), ...compose(e, { ...fresh[0], email: null, first_name: group(fresh) }, openings, 0, s) });
+      else for (const c of (mode === 'single' ? fresh.slice(0, 1) : fresh)) previews.push({ to: c.email, names: name(c), ...compose(e, c, openings, 0, s) });
+    }
+    const preview = previews[0] || null;
     return {
       employer: { ...e, notes: e.notes },
-      openings, seqs, messages, replies, events, preview,
+      openings, messages, replies, events, preview, previews, mode,
+      seqs: seqs.map((x) => ({ ...x, contactNames: [x.contact_id, ...(x.cc_contact_ids || [])].map((id) => contacts.find((c) => c.id === id)).filter(Boolean).map(name).join(', ') })),
       contacts: contacts.map((c) => {
         const usable = isUsable(c, ctx);
         const email = (c.email || '').toLowerCase();
         const why = usable ? null : !c.email ? 'No email address' : c.bad ? 'Said they are the wrong contact, or the email bounced'
           : ctx.suppressedEmails.has(email) ? 'Opted out or bounced (on the suppression list)'
             : ctx.suppressedDomains.has(email.split('@')[1]) ? 'Domain is on the suppression list' : 'Title is outside your contact title priority list';
-        return { ...c, usable, unusableReason: why, selected: chosen?.id === c.id };
+        const postings = openings.filter((o) => (o.contact_email || '').toLowerCase() === email).map((o) => `${o.specialty} ${o.role}`);
+        return { ...c, usable, unusableReason: why, selected: selected.some((x) => x.id === c.id), inSequence: inSeq.has(c.id) ? inSeq.get(c.id).status : null, postings };
       }),
     };
   },
@@ -117,7 +137,15 @@ export const routes = {
       case 'choose': {
         const c = await one('SELECT id FROM contacts WHERE id = $1 AND employer_id = $2', [body.contactId, id]);
         if (!c) throw httpError(400, 'That contact does not belong to this employer');
-        await q('UPDATE employers SET selected_contact_id = $2 WHERE id = $1', [id, c.id]);
+        await q('UPDATE employers SET selected_contact_id = $2, selected_contact_ids = ARRAY[$2]::int[] WHERE id = $1', [id, c.id]);
+        break;
+      }
+      case 'chooseMany': {
+        const ids = (Array.isArray(body.contactIds) ? body.contactIds : []).map(Number).filter(Number.isInteger);
+        const valid = (await q('SELECT id FROM contacts WHERE employer_id = $1 AND id = ANY($2::int[])', [id, ids])).map((r) => r.id);
+        const ordered = ids.filter((x) => valid.includes(x));
+        await q('UPDATE employers SET selected_contact_ids = $2::int[], selected_contact_id = $3 WHERE id = $1', [id, ordered, ordered[0] || null]);
+        if (e.bucket === 'outreach' && ordered.length) await q(`UPDATE employers SET decision = 'recontact' WHERE id = $1`, [id]);
         break;
       }
       case 'protect':
@@ -142,7 +170,7 @@ export const routes = {
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw httpError(400, 'Enter a valid email address.');
         const name = String(body.name || '').trim();
         const r = await addContact(id, { fullName: name || email, firstName: name.split(' ')[0] || '', lastName: name.split(' ').slice(1).join(' '), title: body.title || 'Added by owner', email }, 'Referral');
-        await q('UPDATE employers SET selected_contact_id = $2 WHERE id = $1', [id, r.contact.id]);
+        await q('UPDATE employers SET selected_contact_id = $2, selected_contact_ids = array_append(selected_contact_ids, $2) WHERE id = $1', [id, r.contact.id]);
         await logEvent(id, `Contact added by owner: ${email}`);
         break;
       }

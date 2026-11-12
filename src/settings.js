@@ -80,7 +80,13 @@ export const DEFAULT_SETTINGS = {
   warmup: { enabled: true, startPerDay: 10, increasePerDay: 5 },  // ramp toward dailyCap from the first send day
   minGapSeconds: 90,           // random spacing between sends
   maxGapSeconds: 240,
-  perEmployerPerDay: 1,        // never email the same organization twice in a day
+  perEmployerPerDay: 2,        // max emails to one organization per day (all its contacts together)
+  // When a client has several contacts (e.g. one recruiter per posting):
+  //   'separate' = each contact gets their own sequence about their own postings
+  //   'together' = one sequence, one email addressed to all of them
+  //   'single'   = only the best contact
+  multiContact: 'separate',
+  maxContactsPerEmployer: 3,
   followupGap1Days: 3,         // send days after the initial email
   followupGap2Days: 4,         // send days after follow-up 1
 

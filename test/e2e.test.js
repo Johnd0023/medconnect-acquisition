@@ -125,7 +125,7 @@ test('full pipeline', async () => {
   assert.ok(sent.every((m) => m.body.includes('100 Main St') && m.body.toLowerCase().includes('unsubscribe')), 'footer with address + opt-out');
   const nw = sent.find((m) => m.to_email === 'jfox@northwindrmc.org');
   assert.ok(nw, 'listing recruiter chosen for Northwind');
-  assert.match(nw.body, /one of 2 provider openings/);
+  assert.match(nw.body, /one of 2 openings/);
   assert.ok(calls.some((c) => c.url.includes('oauth2/v2.0/token') && c.body.grant_type === 'refresh_token'), 'token refreshed');
   assert.equal((await one(`SELECT step FROM sequences WHERE employer_id = $1`, [northwind.id])).step, 1);
 

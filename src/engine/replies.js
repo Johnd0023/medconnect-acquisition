@@ -3,7 +3,7 @@ import { q, one, logEvent, kvGet, kvSet } from '../db.js';
 import { cfg } from '../config.js';
 import * as outlook from '../integrations/outlook.js';
 import { classifyReply } from '../integrations/ai.js';
-import { stopSequence } from './outreach.js';
+import { stopSequence, stopSequenceById } from './outreach.js';
 import { requalify } from './qualify.js';
 import { isRelay } from '../util.js';
 
@@ -36,7 +36,7 @@ async function matchSentMessage(msg, fromEmail) {
     if (m) return m;
   }
   if (fromEmail && !isRelay(fromEmail)) {
-    const m = await one(`SELECT * FROM messages WHERE lower(to_email) = $1 AND status = 'sent' ORDER BY sent_at DESC LIMIT 1`, [fromEmail]);
+    const m = await one(`SELECT * FROM messages WHERE $1 = ANY(string_to_array(lower(to_email), ', ')) AND status = 'sent' ORDER BY sent_at DESC LIMIT 1`, [fromEmail]);
     if (m) return m;
   }
   return null;
@@ -44,35 +44,54 @@ async function matchSentMessage(msg, fromEmail) {
 
 async function matchBounce(text) {
   for (const e of (text.match(EMAIL_RE) || []).map((x) => x.toLowerCase())) {
-    const m = await one(`SELECT * FROM messages WHERE lower(to_email) = $1 AND status = 'sent' AND sent_at > now() - interval '14 days' ORDER BY sent_at DESC LIMIT 1`, [e]);
+    const m = await one(`SELECT * FROM messages WHERE $1 = ANY(string_to_array(lower(to_email), ', ')) AND status = 'sent' AND sent_at > now() - interval '14 days' ORDER BY sent_at DESC LIMIT 1`, [e]);
+    if (m) m._replier = e;
     if (m) return m;
   }
   return null;
 }
 
-/** Apply the effects of a categorized reply. */
+/** Apply the effects of a categorized reply.
+ *  Opt-out, bounce, wrong person: only that person's sequence stops. Any other human reply (interested,
+ *  not now, referral…) stops every sequence at that client, so colleagues aren't followed up after someone answered. */
 export async function applyReply(reply, message) {
   const empId = message.employer_id;
-  const contact = await one('SELECT * FROM contacts WHERE id = $1', [message.contact_id]);
+  const replier = (reply.from_email && await one(`SELECT * FROM contacts WHERE employer_id = $1 AND lower(email) = $2`, [empId, reply.from_email.toLowerCase()]))
+    || (message._replier && await one(`SELECT * FROM contacts WHERE employer_id = $1 AND lower(email) = $2`, [empId, message._replier]))
+    || await one('SELECT * FROM contacts WHERE id = $1', [message.contact_id]);
+  if (replier && replier.id !== reply.contact_id) await q('UPDATE replies SET contact_id = $2 WHERE id = $1', [reply.id, replier.id]);
   const labels = { interested: 'Interested', not_now: 'Not right now', referral: 'Referral', wrong_contact: 'Wrong contact', opt_out: 'Opt-out', ooo: 'Out of office', bounce: 'Bounced', other: 'Reply' };
   await logEvent(empId, `${labels[reply.category]} reply from ${reply.from_email}`);
-  if (reply.category === 'ooo') { await stopSequence(empId, 'Out-of-office reply. Resume from the Response Queue.', 'paused'); }
-  else {
+  const personal = ['opt_out', 'bounce', 'wrong_contact'].includes(reply.category);
+  const seqId = message.sequence_id;
+  if (reply.category === 'ooo') {
+    if (seqId) await stopSequenceById(seqId, 'Out-of-office reply. Resume from the Response Queue.', 'paused');
+  } else if (personal) {
+    // Remove just this person: their own sequence stops; in a shared email they're dropped from the recipients.
+    const seq = seqId && await one('SELECT * FROM sequences WHERE id = $1', [seqId]);
+    if (seq && replier && seq.contact_id !== replier.id && (seq.cc_contact_ids || []).includes(replier.id)) {
+      await q('UPDATE sequences SET cc_contact_ids = array_remove(cc_contact_ids, $2) WHERE id = $1', [seq.id, replier.id]);
+      await logEvent(empId, `${replier.email} removed from the shared sequence (${labels[reply.category]})`);
+    } else if (seqId) {
+      await stopSequenceById(seqId, reply.category === 'bounce' ? 'Email bounced' : `${labels[reply.category]} from ${reply.from_email}`);
+    }
+  } else {
     await q(`UPDATE sequences SET replied = true WHERE employer_id = $1 AND status IN ('active','paused')`, [empId]);
-    await stopSequence(empId, reply.category === 'bounce' ? 'Email bounced' : `Prospect replied (${labels[reply.category]})`);
+    await stopSequence(empId, `Prospect replied (${labels[reply.category]})`);
   }
-  if (reply.category === 'opt_out' || reply.category === 'bounce') {
+  const contact = replier;
+  if (contact && (reply.category === 'opt_out' || reply.category === 'bounce')) {
     if (isRelay(contact.email)) {
-      // Shared PracticeMatch address: suppress this client only.
       await q(`UPDATE employers SET decision = 'suppressed' WHERE id = $1`, [empId]);
       await logEvent(empId, `Client suppressed (${reply.category === 'bounce' ? 'bounce' : 'opt-out'} via PracticeMatch forwarding address)`);
+      await stopSequence(empId, 'Opt-out via PracticeMatch forwarding address');
     } else {
       await q(`INSERT INTO suppressions (kind, value, reason) VALUES ('email', $1, $2) ON CONFLICT DO NOTHING`, [contact.email.toLowerCase(), reply.category === 'bounce' ? 'Bounced' : 'Opted out']);
     }
   }
-  if (reply.category === 'wrong_contact' || reply.category === 'bounce') await q('UPDATE contacts SET bad = true WHERE id = $1', [contact.id]);
+  if (contact && (reply.category === 'wrong_contact' || reply.category === 'bounce')) await q('UPDATE contacts SET bad = true WHERE id = $1', [contact.id]);
   if (reply.category === 'interested') {
-    await q(`INSERT INTO tasks (employer_id, text, due_date) VALUES ($1, $2, (now() AT TIME ZONE $3)::date + 1)`, [empId, `Call ${contact.full_name || contact.email}: replied interested`, cfg.timezone]);
+    await q(`INSERT INTO tasks (employer_id, text, due_date) VALUES ($1, $2, (now() AT TIME ZONE $3)::date + 1)`, [empId, `Call ${contact?.full_name || reply.from_email}: replied interested`, cfg.timezone]);
   }
   await requalify(empId);
 }

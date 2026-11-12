@@ -8,26 +8,54 @@ import { compose } from './compose.js';
 import * as outlook from '../integrations/outlook.js';
 import { zoned, hhmmToMin, startOfBusinessDay, addSendDays, atLocalTime, randInt, isRelay } from '../util.js';
 
+/** Has this contact already had a sequence? A PracticeMatch forwarding address counts per client, a real address overall. */
+async function alreadyContacted(c) {
+  return isRelay(c.email)
+    ? one(`SELECT s.status, e.name FROM sequences s JOIN employers e ON e.id = s.employer_id WHERE s.contact_id = $1 OR $1 = ANY(s.cc_contact_ids) ORDER BY s.started_at DESC LIMIT 1`, [c.id])
+    : one(`SELECT s.status, e.name FROM sequences s JOIN employers e ON e.id = s.employer_id
+           JOIN contacts ct ON ct.id = s.contact_id OR ct.id = ANY(s.cc_contact_ids)
+           WHERE lower(ct.email) = lower($1) ORDER BY s.started_at DESC LIMIT 1`, [c.email]);
+}
+
+/** Enroll a client's selected contacts. Returns the contacts enrolled. */
 export async function enroll(employerId, { by = 'owner' } = {}) {
   const ctx = await loadContext();
   const r = await requalify(employerId, ctx);
   if (!r) throw new Error('Employer not found');
   if (r.bucket !== 'ready') throw new Error(`Not ready for outreach: ${r.reasons.join('; ') || r.status}`);
-  const guard = protectedRecipientMatch({ employer: r.employer, contact: r.chosen, contacts: r.contacts, openings: r.openings }, ctx);
+  const guard = protectedRecipientMatch({ employer: r.employer, contacts: r.contacts, openings: r.openings }, ctx);
   if (guard) throw new Error(`Protected client "${guard}": outreach is not allowed`);
-  const c = r.chosen;
-  // One sequence per contact. A PracticeMatch forwarding address counts once per client, a real address once overall.
-  const already = isRelay(c.email)
-    ? await one(`SELECT s.status, e.name FROM sequences s JOIN employers e ON e.id = s.employer_id WHERE s.contact_id = $1 ORDER BY s.started_at DESC LIMIT 1`, [c.id])
-    : await one(`SELECT s.status, e.name FROM sequences s JOIN contacts ct ON ct.id = s.contact_id JOIN employers e ON e.id = s.employer_id
-                 WHERE lower(ct.email) = lower($1) ORDER BY s.started_at DESC LIMIT 1`, [c.email]);
-  const emp = await one('SELECT decision FROM employers WHERE id = $1', [employerId]);
-  if (already && emp.decision !== 'recontact') throw new Error(`${c.email} was already contacted (${already.name}). Each contact gets one sequence; follow-ups are part of it.`);
-  await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status) VALUES ($1, $2, 0, now(), 'active')`, [employerId, c.id]);
+  const recontact = r.employer.decision === 'recontact';
+  const fresh = [];
+  const skipped = [];
+  for (const c of r.selected) {
+    const prior = await alreadyContacted(c);
+    if (prior && !recontact) skipped.push(`${c.email} (already contacted for ${prior.name})`);
+    else fresh.push(c);
+  }
+  if (!fresh.length) throw new Error(skipped.length ? `Already contacted: ${skipped.join('; ')}. Each contact gets one sequence; follow-ups are part of it.` : 'No contact selected');
+  const mode = ctx.settings.multiContact || 'separate';
+  if (mode === 'together' && fresh.length > 1) {
+    await q(`INSERT INTO sequences (employer_id, contact_id, cc_contact_ids, step, next_at, status) VALUES ($1, $2, $3::int[], 0, now(), 'active')`,
+      [employerId, fresh[0].id, fresh.slice(1).map((c) => c.id)]);
+    await logEvent(employerId, `Enrolled in outreach (${by}): one email to ${fresh.map((c) => c.full_name || c.email).join(', ')}`);
+  } else {
+    for (const c of mode === 'single' ? fresh.slice(0, 1) : fresh) {
+      await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status) VALUES ($1, $2, 0, now(), 'active')`, [employerId, c.id]);
+      await logEvent(employerId, `Enrolled in outreach (${by}) → ${c.full_name || c.email}${c.title ? `, ${c.title}` : ''}`);
+    }
+  }
+  if (skipped.length) await logEvent(employerId, `Not enrolled again: ${skipped.join('; ')}`);
   await q(`UPDATE employers SET decision = 'approved' WHERE id = $1`, [employerId]);
-  await logEvent(employerId, `Enrolled in outreach (${by}) → ${c.full_name}${c.title ? `, ${c.title}` : ''}`);
   await requalify(employerId, ctx);
-  return c;
+  return fresh[0];
+}
+
+/** Stop or pause one contact's sequence (others at the same client keep going). */
+export async function stopSequenceById(seqId, reason, status = 'stopped') {
+  const s = await one(`UPDATE sequences SET status = $2, stop_reason = $3, claimed_at = NULL WHERE id = $1 AND status IN ('active','paused') RETURNING employer_id`, [seqId, status, reason]);
+  if (s) { await logEvent(s.employer_id, `Sequence ${status === 'paused' ? 'paused' : 'stopped'}: ${reason}`); await requalify(s.employer_id); }
+  return Boolean(s);
 }
 
 export async function stopSequence(employerId, reason, status = 'stopped') {
@@ -110,19 +138,28 @@ export async function sendTick({ force = false } = {}) {
   }
   const contact = r.contacts.find((c) => c.id === seq.contact_id);
   if (!contact || !contact.email || contact.bad || ctx.suppressedEmails.has(contact.email.toLowerCase())) {
-    await stopSequence(emp.id, 'Contact opted out, bounced, or was marked wrong'); return { sent: false, reason: 'stopped' };
+    await stopSequenceById(seq.id, 'Contact opted out, bounced, or was marked wrong'); return { sent: false, reason: 'stopped' };
   }
+  // "Together" sequences also go to the other selected contacts (minus anyone who opted out or bounced since)
+  const others = (seq.cc_contact_ids || []).map((id) => r.contacts.find((c) => c.id === id))
+    .filter((c) => c && c.email && !c.bad && !ctx.suppressedEmails.has(c.email.toLowerCase()));
+  const recipients = [contact, ...others];
   // FINAL GUARDRAIL: never email a protected client, whatever the source (PracticeMatch, Lusha, import, manual).
   // Uses a freshly loaded protected list and every posting behind this contact.
   const guardCtx = await loadContext();
-  const guard = protectedRecipientMatch({ employer: emp, contact, contacts: r.contacts, openings: r.openings }, guardCtx);
+  const guard = protectedRecipientMatch({ employer: emp, contacts: recipients.concat(r.contacts), openings: r.openings }, guardCtx);
   if (guard) {
     await logEvent(emp.id, `Email to ${contact.email} BLOCKED: matches protected client "${guard}"`);
     await stopSequence(emp.id, `Blocked before sending: protected client "${guard}"`);
     return { sent: false, reason: `Blocked: protected client ${guard}` };
   }
-  const m = compose(emp, contact, r.openings, seq.step, s);
-  if (m.missing.length) { await stopSequence(emp.id, `Missing verified fact: ${m.missing.join(', ')}`, 'paused'); return { sent: false, reason: 'paused (missing fact)' }; }
+  const names = recipients.map((c) => c.first_name).filter(Boolean);
+  const addressee = recipients.length > 1
+    ? { ...contact, email: null, first_name: names.length === recipients.length ? (names.length === 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`) : 'there' }
+    : contact;
+  const m = compose(emp, addressee, r.openings, seq.step, s);
+  if (m.missing.length) { await stopSequenceById(seq.id, `Missing verified fact: ${m.missing.join(', ')}`, 'paused'); return { sent: false, reason: 'paused (missing fact)' }; }
+  const toList = recipients.map((c) => ({ address: c.email, name: c.full_name || undefined }));
 
   let result = {}; let status = 'sent'; let error = null;
   if (cfg.dryRun) {
@@ -131,8 +168,8 @@ export async function sendTick({ force = false } = {}) {
     try {
       const prev = seq.step > 0 ? await one(`SELECT internet_message_id FROM messages WHERE sequence_id = $1 AND status = 'sent' ORDER BY sent_at DESC LIMIT 1`, [seq.id]) : null;
       result = seq.step === 0
-        ? await outlook.sendNew({ to: contact.email, toName: contact.full_name, subject: m.subject, body: m.body })
-        : await outlook.sendFollowUp({ to: contact.email, toName: contact.full_name, previousInternetMessageId: prev?.internet_message_id, body: m.body, fallbackSubject: m.subject });
+        ? await outlook.sendNew({ to: toList, subject: m.subject, body: m.body })
+        : await outlook.sendFollowUp({ to: toList, previousInternetMessageId: prev?.internet_message_id, body: m.body, fallbackSubject: m.subject });
     } catch (e) {
       error = e.message;
       if (e.status === 401 || e.status === 403 || e.code === 'NotConnected' || e.code === 'invalid_grant' || e.code === 'ErrorAccessDenied' || e.code === 'ErrorExceededMessageLimit' || e.code === 'ErrorSubmissionQuotaExceeded') {
@@ -146,22 +183,22 @@ export async function sendTick({ force = false } = {}) {
 
   await q(`INSERT INTO messages (sequence_id, employer_id, contact_id, step, to_email, subject, body, status, error, graph_id, internet_message_id, conversation_id)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-  [seq.id, emp.id, contact.id, seq.step, contact.email, m.subject, m.body, status, error, result.graphId || null, result.internetMessageId || null, result.conversationId || null]);
+  [seq.id, emp.id, contact.id, seq.step, recipients.map((c) => c.email).join(', '), m.subject, m.body, status, error, result.graphId || null, result.internetMessageId || null, result.conversationId || null]);
   await kvSet('next_send_at', new Date(Date.now() + randInt(s.minGapSeconds, s.maxGapSeconds) * 1000).toISOString());
 
   const label = seq.step === 0 ? 'Initial email' : `Follow-up ${seq.step}`;
   if (status === 'failed') {
-    await stopSequence(emp.id, `${label} failed to send: ${error}`);
+    await stopSequenceById(seq.id, `${label} failed to send: ${error}`);
     return { sent: false, reason: `failed: ${error}` };
   }
   if (status === 'dry_run') {
-    await logEvent(emp.id, `${label} composed for ${contact.email} (dry run, not sent)`);
+    await logEvent(emp.id, `${label} composed for ${recipients.map((c) => c.email).join(', ')} (dry run, not sent)`);
     await q(`UPDATE sequences SET status = 'paused', stop_reason = $2, claimed_at = NULL WHERE id = $1`, [seq.id, `Dry run: ${label.toLowerCase()} composed, not sent. Resume once live sending is on.`]);
     await requalify(emp.id, ctx);
-    return { sent: true, dryRun: true, to: contact.email, subject: m.subject };
+    return { sent: true, dryRun: true, to: recipients.map((c) => c.email).join(', '), subject: m.subject };
   }
 
-  await logEvent(emp.id, `${label} sent to ${contact.email}`);
+  await logEvent(emp.id, `${label} sent to ${recipients.map((c) => c.email).join(', ')}`);
   const nextStep = seq.step + 1;
   if (nextStep >= 3) {
     await q(`UPDATE sequences SET step = $2, status = 'completed', stop_reason = 'Sequence finished with no reply', claimed_at = NULL, conversation_id = coalesce(conversation_id, $3) WHERE id = $1`, [seq.id, nextStep, result.conversationId || null]);
@@ -172,7 +209,7 @@ export async function sendTick({ force = false } = {}) {
       [seq.id, nextStep, atLocalTime(nextDay, s.sendWindowStart), result.conversationId || null]);
   }
   await requalify(emp.id, ctx);
-  return { sent: true, to: contact.email, subject: m.subject };
+  return { sent: true, to: recipients.map((c) => c.email).join(', '), subject: m.subject };
 }
 
 export async function clearSendBlock() { await kvSet('send_blocked', null); }

@@ -97,11 +97,14 @@ async function graph(method, path, body) {
 const SELECT = 'id,conversationId,internetMessageId,subject';
 
 /** Send a brand-new email. Returns ids needed to thread follow-ups and match replies. */
+const recipientsOf = (to, toName) => (Array.isArray(to) ? to : [{ address: to, name: toName }])
+  .map((r) => ({ emailAddress: { address: r.address, name: r.name || undefined } }));
+
 export async function sendNew({ to, toName, subject, body }) {
   const draft = await graph('POST', '/me/messages', {
     subject,
     body: { contentType: 'Text', content: body },
-    toRecipients: [{ emailAddress: { address: to, name: toName || undefined } }],
+    toRecipients: recipientsOf(to, toName),
   });
   await graph('POST', `/me/messages/${encodeURIComponent(draft.id)}/send`);
   return { graphId: draft.id, conversationId: draft.conversationId, internetMessageId: draft.internetMessageId };
@@ -120,7 +123,7 @@ export async function sendFollowUp({ to, toName, previousInternetMessageId, body
   const sent = new Date(original.sentDateTime).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
   const quoted = (original.body?.content || '').split('\n').map((l) => `> ${l}`).join('\n');
   await graph('PATCH', `/me/messages/${encodeURIComponent(reply.id)}`, {
-    toRecipients: [{ emailAddress: { address: to, name: toName || undefined } }],
+    toRecipients: recipientsOf(to, toName),
     body: { contentType: 'Text', content: `${body}\n\nOn ${sent}, I wrote:\n${quoted}` },
   });
   await graph('POST', `/me/messages/${encodeURIComponent(reply.id)}/send`);

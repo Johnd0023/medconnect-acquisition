@@ -164,3 +164,63 @@ test('protected-client guardrail blocks every route right before sending', async
   assert.equal(protectedRecipientMatch({ employer: { norm_name: 'riverbend health system north tower', domain: null } }, ctx), 'Riverbend Health System');
   assert.equal(protectedRecipientMatch({ employer: { norm_name: 'hospital', domain: null } }, ctx), null, 'generic words never match');
 });
+
+test('several posting contacts at one client: separate sequences, shared reply stop, together mode', async () => {
+  const { importListings } = await import('../src/engine/discovery.js');
+  const { applyReply } = await import('../src/engine/replies.js');
+  await q('TRUNCATE employers, openings, contacts, sequences, messages, replies, suppressions, protected_accounts, tasks, events RESTART IDENTITY CASCADE');
+  await saveSettings({ multiContact: 'separate', perEmployerPerDay: 2, supervised: true });
+  const row = (id, title, spec, role, email, org = 'Methodist Le Bonheur Healthcare', domain = 'methodisthealth.org') => ({ listingId: id, employer: org, domain, specialty: spec, role, city: 'Memphis', state: 'TN',
+    contactName: '', contactTitle: 'Job posting contact', contactEmail: email, url: '', description: '', restriction: null, postedAt: new Date(), pmCode: id + 'X', title, relay: false });
+  await importListings([
+    row('801', 'Family Medicine Physician', 'Family Medicine', 'Physician', 'keri.wuertz@mlh.org'),
+    row('802', 'Cardiology Physician Assistant', 'Cardiology', 'Physician Assistant', 'lewis.rowe@mlh.org'),
+    row('803', 'Vascular Physician', 'Vascular Surgery', 'Physician', 'lewis.rowe@mlh.org'),
+  ]);
+  const emp = await one(`SELECT * FROM employers WHERE name = 'Methodist Le Bonheur Healthcare'`);
+  assert.equal(Number((await one('SELECT count(*) n FROM contacts WHERE employer_id = $1', [emp.id])).n), 2);
+  // Name the contacts like the real postings do
+  await q(`UPDATE contacts SET first_name = 'Keri', full_name = 'Keri Wuertz' WHERE email = 'keri.wuertz@mlh.org'`);
+  await q(`UPDATE contacts SET first_name = 'Lewis', full_name = 'Lewis Rowe' WHERE email = 'lewis.rowe@mlh.org'`);
+  await routes['POST /api/employers/:id/action']({ params: { id: emp.id }, body: { action: 'approve' } });
+  const detail = await routes['GET /api/employers/:id']({ params: { id: emp.id } });
+  assert.equal(detail.contacts.filter((c) => c.selected).length, 2, 'both posting contacts ticked automatically');
+  assert.equal(detail.previews.length, 2, 'one preview per contact');
+  await enroll(emp.id);
+  assert.equal(Number((await one(`SELECT count(*) n FROM sequences WHERE employer_id = $1 AND status = 'active'`, [emp.id])).n), 2);
+  for (let i = 0; i < 3; i++) await sendTick({ force: true });
+  const sent = await q(`SELECT to_email, subject, body FROM messages WHERE employer_id = $1 ORDER BY id`, [emp.id]);
+  assert.equal(sent.length, 2);
+  const keri = sent.find((m) => m.to_email === 'keri.wuertz@mlh.org');
+  const lewis = sent.find((m) => m.to_email === 'lewis.rowe@mlh.org');
+  assert.match(keri.body, /^Hi Keri,/); assert.match(keri.subject, /Family Medicine/);
+  assert.match(lewis.body, /^Hi Lewis,/); assert.match(lewis.body, /one of 2 openings/); assert.doesNotMatch(lewis.subject, /Family Medicine/);
+  // Keri replies "interested": Lewis's follow-ups stop too
+  const msg = await one(`SELECT * FROM messages WHERE to_email = 'keri.wuertz@mlh.org'`);
+  const rep = await one(`INSERT INTO replies (employer_id, contact_id, message_id, graph_id, from_email, subject, body_preview, received_at, category) VALUES ($1,$2,$3,'g1','keri.wuertz@mlh.org','RE','Yes please send profiles', now(), 'interested') RETURNING *`, [emp.id, msg.contact_id, msg.id]);
+  await applyReply(rep, msg);
+  assert.equal(Number((await one(`SELECT count(*) n FROM sequences WHERE employer_id = $1 AND status = 'active'`, [emp.id])).n), 0, 'all sequences at the client stop on a reply');
+
+  // Together mode: one email to both, and an opt-out removes only that person
+  await saveSettings({ multiContact: 'together' });
+  await importListings([
+    row('901', 'Hospitalist', 'Hospitalist', 'Physician', 'ann.lee@baptist.org', 'Baptist Memorial Hospital', 'baptistonline.org'),
+    row('902', 'ICU Nurse Practitioner', 'Critical Care', 'Nurse Practitioner', 'bo.king@baptist.org', 'Baptist Memorial Hospital', 'baptistonline.org'),
+  ]);
+  const b = await one(`SELECT * FROM employers WHERE name = 'Baptist Memorial Hospital'`);
+  await q(`UPDATE contacts SET first_name = initcap(split_part(email, '.', 1)) WHERE employer_id = $1`, [b.id]);
+  await routes['POST /api/employers/:id/action']({ params: { id: b.id }, body: { action: 'approve' } });
+  await enroll(b.id);
+  const seqs = await q(`SELECT * FROM sequences WHERE employer_id = $1`, [b.id]);
+  assert.equal(seqs.length, 1); assert.equal(seqs[0].cc_contact_ids.length, 1);
+  for (let i = 0; i < 2; i++) await sendTick({ force: true });
+  const tog = await one(`SELECT * FROM messages WHERE employer_id = $1`, [b.id]);
+  assert.equal(tog.to_email, 'ann.lee@baptist.org, bo.king@baptist.org');
+  assert.match(tog.body, /^Hi Ann and Bo,/);
+  const optOut = await one(`INSERT INTO replies (employer_id, contact_id, message_id, graph_id, from_email, subject, body_preview, received_at, category) VALUES ($1,$2,$3,'g2','bo.king@baptist.org','RE','unsubscribe', now(), 'opt_out') RETURNING *`, [b.id, tog.contact_id, tog.id]);
+  await applyReply(optOut, tog);
+  const after = await one(`SELECT * FROM sequences WHERE employer_id = $1`, [b.id]);
+  assert.equal(after.status, 'active', 'sequence continues for Ann');
+  assert.equal(after.cc_contact_ids.length, 0, 'Bo removed after opting out');
+  await saveSettings({ multiContact: 'separate' });
+});

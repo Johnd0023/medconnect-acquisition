@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS employers (
   notes               jsonb NOT NULL DEFAULT '[]'::jsonb
 );
 ALTER TABLE employers ADD COLUMN IF NOT EXISTS ai_checked boolean NOT NULL DEFAULT false;
+ALTER TABLE employers ADD COLUMN IF NOT EXISTS selected_contact_ids int[] NOT NULL DEFAULT '{}';
 CREATE UNIQUE INDEX IF NOT EXISTS employers_domain_uq ON employers (domain) WHERE domain IS NOT NULL;
 CREATE INDEX IF NOT EXISTS employers_norm_name_ix ON employers (norm_name);
 CREATE INDEX IF NOT EXISTS employers_bucket_ix ON employers (bucket);
@@ -97,7 +98,9 @@ CREATE TABLE IF NOT EXISTS sequences (
   conversation_id text,
   claimed_at      timestamptz
 );
-CREATE UNIQUE INDEX IF NOT EXISTS sequences_one_open_per_employer ON sequences (employer_id) WHERE status IN ('active','paused');
+-- Several contacts at one client can each have their own sequence.
+DROP INDEX IF EXISTS sequences_one_open_per_employer;
+ALTER TABLE sequences ADD COLUMN IF NOT EXISTS cc_contact_ids int[] NOT NULL DEFAULT '{}';
 CREATE UNIQUE INDEX IF NOT EXISTS sequences_one_active_per_contact ON sequences (contact_id) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS sequences_due_ix ON sequences (next_at) WHERE status = 'active';
 
