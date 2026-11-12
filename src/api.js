@@ -9,6 +9,7 @@ import { runDiscovery, importListings, lushaFillContacts, resolveIndustries, run
 import { pollReplies, referralFrom } from './engine/replies.js';
 import { addContact, inferType } from './engine/ingest.js';
 import { runJob } from './scheduler.js';
+import { ingestToken, starter } from './collector.js';
 import * as outlook from './integrations/outlook.js';
 import * as lusha from './integrations/lusha.js';
 import * as pm from './integrations/practicematch.js';
@@ -303,7 +304,11 @@ export const routes = {
     const key = `manual-${zoned().ymd}-${Date.now()}`;
     return { ok: true, summary: await runJob('discovery', key, () => runDiscovery({ trigger: 'manual' })) };
   },
+  'GET /api/collector': async () => ({ starter: starter(await ingestToken()) }),
+  'POST /api/collector/rotate': async () => ({ starter: starter(await ingestToken({ rotate: true })), message: 'New scan link created. Old links stop working.' }),
+
   'POST /api/jobs/practicematch': async () => {
+    if ((await getSettings()).practicematch?.mode === 'browser') return { ok: true, browser: true, message: 'Runs in your browser: opening PracticeMatch…' };
     const running = await one(`SELECT 1 FROM job_runs WHERE job = 'pm-scan' AND status = 'running' AND started_at > now() - interval '2 hours'`);
     if (running) return { ok: true, message: 'A PracticeMatch scan is already running. Results appear on Today when it finishes.' };
     const key = `manual-${zoned().ymd}-${Date.now()}`;

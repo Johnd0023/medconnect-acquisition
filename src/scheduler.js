@@ -43,7 +43,7 @@ export async function tick(now = new Date()) {
 
   // Extra PracticeMatch scans (the first scan time is covered by the morning discovery run)
   const P = s.practicematch || {};
-  if (P.enabled && s.discoveryDays.includes(z.dow)) {
+  if (P.enabled && P.mode === 'server' && s.discoveryDays.includes(z.dow)) {
     for (const t of (P.scanTimes || []).slice(1)) {
       if (minutes >= hhmmToMin(t)) await guarded('pm-scan', () => runJob('pm-scan', `${z.ymd}#${t}`, () => runPracticeMatchScan({ autoEnroll: true })));
     }

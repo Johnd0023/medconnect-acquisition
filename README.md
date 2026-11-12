@@ -79,6 +79,8 @@ Use a Microsoft 365 admin account.
 ## Sources
 
 ### PracticeMatch (primary source)
+**Runs in your browser.** PracticeMatch's firewall (Cloudflare) refuses requests from cloud servers, so the scan runs on practicematch.com in your own browser: Settings → PracticeMatch scan → drag **"MedConnect: scan PracticeMatch"** to your bookmarks bar, open PracticeMatch, click it, and keep the tab open until the MedConnect box says Done. It sends jobs to `/ingest/practicematch/*` with a private token (Settings → Make a new link to replace it). Daily automatic runs can be scheduled in the Claude desktop app. `mode: 'server'` remains available if PracticeMatch allowlists the server or provides API access.
+
 **Daily scan** at 06:00 and 18:00 ET (Settings → PracticeMatch scan):
 1. Reads PracticeMatch's **in-house** job boards (agency postings excluded) for jobs **posted today**:
    - physician jobs: `/physicians/jobs/?jobAge=1&isFirm=0`

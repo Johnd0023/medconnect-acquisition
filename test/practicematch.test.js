@@ -70,7 +70,7 @@ test('PracticeMatch scan, consolidation and one sequence per contact', async () 
   await migrate();
   await q('TRUNCATE employers, openings, contacts, sequences, messages, replies, suppressions, protected_accounts, tasks, events, job_runs, lusha_usage, oauth_tokens, kv, meetings RESTART IDENTITY CASCADE');
   await q(`UPDATE settings SET data = '{}'::jsonb`); invalidateSettings();
-  await saveSettings({ companyAddress: '100 Main St, Columbus, OH 43215', practicematch: { delayMs: 800 }, sendDays: [0, 1, 2, 3, 4, 5, 6], sendWindowStart: '00:00', sendWindowEnd: '23:59', minGapSeconds: 0, maxGapSeconds: 0, warmup: { enabled: false } });
+  await saveSettings({ companyAddress: '100 Main St, Columbus, OH 43215', practicematch: { delayMs: 800, mode: 'server' }, sendDays: [0, 1, 2, 3, 4, 5, 6], sendWindowStart: '00:00', sendWindowEnd: '23:59', minGapSeconds: 0, maxGapSeconds: 0, warmup: { enabled: false } });
 
   const r = await runPracticeMatchScan({});
   assert.equal(r.listings, 9, 'every role kept by default');

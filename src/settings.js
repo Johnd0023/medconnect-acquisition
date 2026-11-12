@@ -87,6 +87,7 @@ export const DEFAULT_SETTINGS = {
   // --- PracticeMatch daily scan ---
   practicematch: {
     enabled: true,
+    mode: 'browser',            // 'browser' = runs in your browser on practicematch.com (their firewall blocks cloud servers); 'server' = from Railway
     boards: ['physicians', 'advanced-practitioners'], // physician and advanced-practice (NP, PA, CRNA) job boards
     inHouseOnly: true,          // skip postings by staffing agencies
     providersOnly: false,       // false = every role (RN, techs, therapists…) at healthcare facilities; true = physicians and APPs only

@@ -103,7 +103,7 @@ export function parseJob(html, link) {
 }
 
 /** Map a parsed job to the row shape ingestListing() expects. */
-function toRow(job) {
+export function toRow(job) {
   return {
     listingId: job.listingId,
     employer: job.employer,
@@ -134,7 +134,7 @@ function toRow(job) {
  */
 export async function fetchApprovedListings(settings, log = () => {}, onBatch = null) {
   const P = settings.practicematch || {};
-  if (!P.enabled) return [];
+  if (!P.enabled || P.mode === 'browser') return [];
   const firstRun = !(await q(`SELECT 1 FROM openings WHERE source = 'PM' AND raw ? 'pmCode' LIMIT 1`)).length;
   const jobAge = firstRun ? (P.firstRunJobAge || 7) : (P.jobAge || 1);
   const delay = Math.max(800, P.delayMs || 1500);

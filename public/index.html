@@ -412,6 +412,9 @@ async function renderSettings() {
   <section class="card"><div class="ch"><h2>PracticeMatch scan</h2><span class="sub">Reads each new posting and its "Click to email" contact</span></div><div class="cb form">
     ${sw("s-pm", "practicematch.enabled", s.practicematch?.enabled, "Daily PracticeMatch scan", "Find today's in-house postings, open each new job, and add the client and contact.")}
     <div class="field"><span style="font-weight:500;font-size:13px">Job boards</span><div class="checks">${[["physicians", "Physician jobs"], ["advanced-practitioners", "Advanced practice (NP, PA, CRNA)"]].map(([k, l]) => `<label><input type="checkbox" data-pmboard="${k}" id="pmb-${k}" ${(s.practicematch?.boards || []).includes(k) ? "checked" : ""}>${l}</label>`).join("")}</div></div>
+    <div class="field" style="grid-column:1/-1"><span style="font-weight:600;font-size:13px">How the scan runs</span><span class="hint">PracticeMatch's firewall blocks cloud servers, so the scan runs in your browser on practicematch.com, on your normal connection. Drag this button to your bookmarks bar, open PracticeMatch, and click it. A small MedConnect box shows progress; keep that tab open until it says Done.</span>
+      <div class="actions" style="margin-top:6px"><a class="btn primary" id="pm-bookmarklet" href="#" onclick="return false" draggable="true">MedConnect: scan PracticeMatch</a><button class="btn sm" data-act="copyStarter">Copy scan code</button><button class="btn sm" data-act="rotateStarter">Make a new link</button><a class="btn sm" href="https://www.practicematch.com/physicians/jobs/" target="_blank" rel="noopener">Open PracticeMatch</a></div>
+      <span class="hint">Daily automatic runs: ask Claude to schedule it in the Claude desktop app (runs while your computer and the app are on).</span></div>
     ${sw("s-pmpo", "practicematch.providersOnly", s.practicematch?.providersOnly === true, "Physicians and APPs only", "Off: every role at healthcare facilities (RN, techs, therapists…). On: only physician, NP, PA, CRNA and midwife jobs.")}
     ${sw("s-pmih", "practicematch.inHouseOnly", s.practicematch?.inHouseOnly !== false, "In-house postings only", "Skip jobs posted by staffing agencies.")}
     <div class="field"><label for="s-pmt">Scan times</label><textarea id="s-pmt" data-path="practicematch.scanTimes" data-kind="list" style="min-height:70px">${esc((s.practicematch?.scanTimes || []).join("\n"))}</textarea><span class="hint">One per line, ${esc(I.timezone)}. The first runs with the morning discovery.</span></div>
@@ -479,6 +482,11 @@ async function renderSettings() {
 }
 
 /* ---------------- drawer ---------------- */
+async function fillBookmarklet() {
+  const a = document.getElementById("pm-bookmarklet");
+  if (!a) return;
+  try { const r = await api("/api/collector"); ui.starter = r.starter; a.setAttribute("href", "javascript:" + encodeURIComponent(r.starter)); a.removeAttribute("onclick"); } catch (e) { /* ignore */ }
+}
 async function renderDrawer() {
   const root = document.getElementById("drawerRoot");
   if (!ui.drawer) { root.innerHTML = ""; return; }
@@ -514,6 +522,7 @@ async function renderAll() {
     const focusId = document.activeElement?.id; const pos = document.activeElement?.selectionStart;
     m.innerHTML = html;
     if (focusId === "qsearch") { const el = document.getElementById("qsearch"); el.focus(); try { el.setSelectionRange(pos, pos); } catch {} }
+    if (v === "settings") await fillBookmarklet();
     await renderDrawer();
   } catch (e) { toast(e.message, true); }
 }
@@ -552,7 +561,14 @@ document.addEventListener("click", async (ev) => {
       case "close": ui.drawer = null; return renderDrawer();
       case "runDiscovery": a.disabled = true; a.textContent = "Running…"; return act(api("/api/jobs/discovery", { method: "POST", body: {} }).then((r) => ({ message: r.summary ? `Discovery done: ${r.summary.newEmployers} new employers, ${r.summary.newContacts} new contacts` : "Discovery already running" })));
       case "sendNow": a.disabled = true; return act(api("/api/send/now", { method: "POST", body: {} }).then((r) => ({ message: r.sent ? `${r.dryRun ? "Composed (dry run)" : "Sent"}: ${r.to}` : `Not sent: ${r.reason}` })));
-      case "pmScan": a.disabled = true; a.textContent = "Scanning… (a few minutes)"; return act(api("/api/jobs/practicematch", { method: "POST", body: {} }));
+      case "pmScan": {
+        const r = await api("/api/jobs/practicematch", { method: "POST", body: {} }).catch((e) => ({ error: e.message }));
+        if (r.error) return toast(r.error, true);
+        if (r.browser) { location.hash = "settings"; setTimeout(() => document.getElementById("pm-bookmarklet")?.scrollIntoView({ block: "center" }), 600); return toast("The scan runs in your browser: open PracticeMatch and click the MedConnect bookmark.", false); }
+        return toast(r.message);
+      }
+      case "copyStarter": try { await navigator.clipboard.writeText(ui.starter || ""); toast("Scan code copied"); } catch { toast("Couldn't copy. Drag the button to your bookmarks bar instead.", true); } return;
+      case "rotateStarter": { const r = await api("/api/collector/rotate", { method: "POST", body: {} }); toast(r.message); return renderAll(); }
       case "pollReplies": return act(api("/api/jobs/replies", { method: "POST", body: {} }).then((r) => ({ message: r.summary.reason || `${r.summary.checked} inbox messages checked, ${r.summary.matched} replies matched` })));
       case "bulk": return act(api("/api/queue/bulk", { method: "POST", body: { action: a.dataset.v } }));
       case "addProtected": return act(api("/api/protected", { method: "POST", body: { text: document.getElementById("prot-add").value } }));

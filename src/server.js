@@ -7,6 +7,8 @@ import { migrate, pool } from './db.js';
 import { routes, httpError } from './api.js';
 import { startScheduler } from './scheduler.js';
 import * as outlook from './integrations/outlook.js';
+import { handleIngest, ALLOWED_ORIGINS } from './ingest.js';
+import { collectorScript } from './collector.js';
 
 assertCoreConfig();
 
@@ -81,6 +83,22 @@ const server = http.createServer(async (req, res) => {
       const img = await readFile(new URL('../public/logo.png', import.meta.url));
       res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
       return res.end(img);
+    }
+    // In-browser PracticeMatch collector (runs on practicematch.com; token-authenticated, CORS-limited)
+    if (url.pathname === '/pm-collector.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+      return res.end(await collectorScript());
+    }
+    if (url.pathname.startsWith('/ingest/practicematch/')) {
+      const origin = req.headers.origin;
+      const cors = ALLOWED_ORIGINS.includes(origin) ? { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Ingest-Token', 'Access-Control-Max-Age': '600' } : {};
+      if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
+      if (req.method !== 'POST') return send(res, 405, { error: 'POST only' }, cors);
+      try {
+        const raw = await readBody(req, 2 * 1024 * 1024);
+        const out = await handleIngest(url.pathname.split('/').pop(), raw ? JSON.parse(raw) : {}, req.headers['x-ingest-token']);
+        return send(res, 200, out, cors);
+      } catch (e) { return send(res, e.status || 500, { error: e.message }, cors); }
     }
     if (url.pathname === '/login' && req.method === 'GET') return send(res, 200, loginPage());
     if (url.pathname === '/login' && req.method === 'POST') {
