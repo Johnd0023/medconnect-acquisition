@@ -55,6 +55,8 @@ const api = async (path, body) => {
   if (!r.ok) throw new Error(j.error || ('MedConnect ' + r.status));
   return j;
 };
+// Pause between page reads via the MedConnect server: unlike setTimeout, it isn't throttled when the screen is locked.
+const pause = (ms) => api('wait', { ms }).catch(() => sleep(ms));
 try {
   show();
   const conf = await api('start', {});
@@ -70,7 +72,7 @@ try {
       state.listed = links.size; show();
       empty = links.size === before ? empty + 1 : 0;
       if (!found.length || empty >= 2) break;
-      await sleep(conf.delayMs);
+      await pause(conf.delayMs);
     }
   }
   const { newIds } = await api('new', { ids: [...links.keys()] });
@@ -87,7 +89,7 @@ try {
     } catch (e) { state.errors++; }
     state.read++;
     if (batch.length >= 10) await flush();
-    await sleep(conf.delayMs);
+    await pause(conf.delayMs);
   }
   await flush();
   state.phase = 'Finished'; state.done = true; show();

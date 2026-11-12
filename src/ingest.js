@@ -16,6 +16,13 @@ export async function handleIngest(path, body, token) {
   if (!(await validToken(token))) { const e = new Error('Invalid or missing ingest token. Copy a fresh scan link from MedConnect Settings.'); e.status = 401; throw e; }
   const s = await getSettings();
   const P = s.practicematch || {};
+  if (path === 'wait') {
+    // Pacing for the in-browser collector. Browsers throttle timers on hidden pages (locked screen, minimized
+    // window) to about once a minute; a server-side pause is not throttled, so the scan keeps its normal pace.
+    const ms = Math.max(0, Math.min(5000, Number(body.ms) || 0));
+    await new Promise((r) => setTimeout(r, ms));
+    return { ok: true };
+  }
   if (path === 'start') {
     const firstRun = !(await q(`SELECT 1 FROM openings WHERE source = 'PM' AND raw ? 'pmCode' LIMIT 1`)).length;
     const run = await one(`INSERT INTO job_runs (job, run_key, summary) VALUES ('pm-scan', $1, '{"mode":"browser"}'::jsonb) RETURNING id`, [`browser-${Date.now()}`]);
