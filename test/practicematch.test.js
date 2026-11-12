@@ -73,20 +73,21 @@ test('PracticeMatch scan, consolidation and one sequence per contact', async () 
   await saveSettings({ companyAddress: '100 Main St, Columbus, OH 43215', practicematch: { delayMs: 800 }, sendDays: [0, 1, 2, 3, 4, 5, 6], sendWindowStart: '00:00', sendWindowEnd: '23:59', minGapSeconds: 0, maxGapSeconds: 0, warmup: { enabled: false } });
 
   const r = await runPracticeMatchScan({});
-  assert.equal(r.listings, 8, '9 postings, psychologist skipped');
+  assert.equal(r.listings, 9, 'every role kept by default');
   const emps = await q('SELECT id, name, sources FROM employers ORDER BY id');
   const names = emps.map((e) => e.name);
   // Shared PracticeMatch forwarding address: separate clients
   assert.ok(names.includes('Maury Regional Medical Group') && names.includes('Sky Lakes Medical Center'));
   // Same direct recruiter across three ThedaCare sites: one client
   assert.equal(names.filter((n) => /ThedaCare/.test(n)).length, 1, 'ThedaCare sites consolidated under one contact');
-  assert.ok(!names.includes('Terrell Center for Youth'), 'non-provider role skipped');
+  assert.ok(names.includes('Terrell Center for Youth'), 'non-provider roles kept at healthcare facilities');
+  assert.equal((await one(`SELECT role FROM openings WHERE external_id = '1171977'`)).role, 'Psychologist');
   const theda = emps.find((e) => /ThedaCare/.test(e.name));
   assert.equal(Number((await one('SELECT count(*) n FROM openings WHERE employer_id = $1', [theda.id])).n), 3);
   const sky = emps.find((e) => e.name === 'Sky Lakes Medical Center');
   assert.equal(Number((await one('SELECT count(*) n FROM openings WHERE employer_id = $1', [sky.id])).n), 2);
   const relayContacts = await q(`SELECT employer_id FROM contacts WHERE email = 'mnstelmat@practicematch.com'`);
-  assert.equal(relayContacts.length, 2, 'forwarding address stored once per client');
+  assert.equal(relayContacts.length, 3, 'forwarding address stored once per client (Maury, Sky Lakes, Terrell)');
   const crna = await one(`SELECT role FROM openings WHERE external_id = '999001'`);
   assert.equal(crna.role, 'CRNA');
   const np = await one(`SELECT role FROM openings WHERE external_id = '1173489'`);
@@ -101,7 +102,7 @@ test('PracticeMatch scan, consolidation and one sequence per contact', async () 
   // Approve + enroll everything
   await routes['POST /api/queue/bulk']({ body: { action: 'approveClean' } });
   const en = await routes['POST /api/queue/bulk']({ body: { action: 'enrollReady' } });
-  assert.match(en.message, /^5 enrolled/, 'Maury, Sky Lakes, Health First, ThedaCare, WVU each once');
+  assert.match(en.message, /^6 enrolled/, 'Maury, Sky Lakes, Health First, ThedaCare, WVU, Terrell each once');
 
   // A second ThedaCare record with the same recruiter cannot start another sequence
   const extra = await one(`INSERT INTO employers (name, norm_name, type, sources, decision) VALUES ('ThedaCare Extra', 'thedacare extra', 'Urgent care / outpatient', ARRAY['PM'], 'approved') RETURNING id`);
@@ -113,7 +114,7 @@ test('PracticeMatch scan, consolidation and one sequence per contact', async () 
   await q(`INSERT INTO oauth_tokens (provider, account_email, refresh_token_enc, access_token_enc, expires_at) VALUES ('microsoft','bizdev@medconnectstaffing.com',$1,$2, now() + interval '1 hour')`, [encrypt('RT1'), encrypt('AT')]);
   for (let i = 0; i < 8; i++) await sendTick({ force: true });
   const sent = await q(`SELECT to_email, subject, body FROM messages WHERE status = 'sent' ORDER BY id`);
-  assert.equal(sent.length, 5);
+  assert.equal(sent.length, 6);
   const maury = sent.find((m) => /Maury/.test(m.subject) || m.body.includes('Maury'));
   assert.match(maury.subject, /^Opportunity 1176353MS \| /, 'forwarding address keeps the Opportunity code');
   assert.match(maury.body, /^Hi there,/, 'no name on a forwarding address');

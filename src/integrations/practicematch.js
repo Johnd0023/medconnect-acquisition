@@ -79,12 +79,17 @@ export function parseJob(html, link) {
   else if (/nurse practitioner|\bnp\b|\baprn\b|\bfnp\b|\bpmhnp\b|\bagacnp\b|\bnnp\b/i.test(t)) job.role = 'Nurse Practitioner';
   else if (/physician assistant|\bpa-c\b|\bpa\b/i.test(t)) job.role = 'Physician Assistant';
   else if (/nurse midwife|\bcnm\b/i.test(t)) job.role = 'Certified Nurse Midwife';
+  else if (/registered nurse|\brn\b|\blpn\b|nurse manager|charge nurse|nursing/i.test(title)) job.role = 'Nurse (RN/LPN)';
+  else if (/technolog|technician|\btech\b|sonograph|radiograph|phlebotom/i.test(title)) job.role = 'Technologist / Technician';
+  else if (/psycholog/i.test(title)) job.role = 'Psychologist';
+  else if (/therapist|counsel(or|ing)|social worker|\blcsw\b|\blpc\b/i.test(title)) job.role = 'Therapist / Counselor';
+  else if (/pharmacist/i.test(title)) job.role = 'Pharmacist';
   else if (/\b(md|do)\b|physician|hospitalist|surgeon|intensivist|psychiatrist|anesthesiologist|radiologist|patholog|cardiolog|oncolog|neurolog|gastroenterolog|dermatolog|urolog|nephrolog|pulmonolog|rheumatolog|endocrinolog|ophthalmolog|otolaryngolog|obstetric|gynecolog|pediatrician|internist|medical director/i.test(t) || link.board === 'physicians') job.role = 'Physician';
-  else job.role = 'Advanced Practice Provider';
+  else job.role = link.board === 'advanced-practitioners' ? 'Advanced Practice Provider' : 'Clinical role';
   // Not a physician or advanced-practice opening (psychologists, therapists, nurses, techs…): skip
   const nonProvider = /psycholog|therapist|counsel(or|ing)|social worker|\blcsw\b|registered nurse|\brn\b|pharmacist|dentist|dental|chiropract|optometr|audiolog|dietitian|technolog|technician|sonograph|veterinar|medical assistant|scribe/i;
   const providerWords = /physician|\b(md|do)\b|nurse practitioner|\bnp\b|physician assistant|\bpa-?c?\b|crna|nurse anesthetist|midwife|\bcnm\b|\baprn\b|psychiatr/i;
-  job.skip = nonProvider.test(title) && !providerWords.test(title) ? `Not a physician or APP role: ${title.slice(0, 80)}` : null;
+  job.nonProvider = nonProvider.test(title) && !providerWords.test(title);
 
   const r = text.match(RESTRICTION_RE);
   job.restriction = r ? text.slice(Math.max(0, r.index - 60), r.index + r[0].length + 60).replace(/\s+/g, ' ').trim() : null;
@@ -158,12 +163,12 @@ export async function fetchApprovedListings(settings, log = () => {}) {
   for (const id of fresh) {
     try {
       const job = parseJob(await get(links.get(id).path), links.get(id));
-      if (job.skip) { skipped++; continue; }
+      if (job.nonProvider && P.providersOnly) { skipped++; continue; } // only when limited to physicians/APPs
       if (job.employer) rows.push(toRow(job));
     } catch (e) { log(`job ${id}: ${e.message}`); }
     await sleep(delay);
   }
-  log(`PracticeMatch: ${ids.length} postings (jobAge=${jobAge}), ${fresh.length} new, ${rows.length} physician/APP jobs read, ${skipped} other roles skipped`);
+  log(`PracticeMatch: ${ids.length} postings (jobAge=${jobAge}), ${fresh.length} new, ${rows.length} jobs read${skipped ? `, ${skipped} non-provider roles skipped` : ''}`);
   return rows;
 }
 

@@ -89,6 +89,7 @@ export const DEFAULT_SETTINGS = {
     enabled: true,
     boards: ['physicians', 'advanced-practitioners'], // physician and advanced-practice (NP, PA, CRNA) job boards
     inHouseOnly: true,          // skip postings by staffing agencies
+    providersOnly: false,       // false = every role (RN, techs, therapists…) at healthcare facilities; true = physicians and APPs only
     scanTimes: ['06:00', '18:00'], // jobs posted "today", read twice a day; new job IDs only
     jobAge: 1,                  // 1 = today, 7, 30
     firstRunJobAge: 1,          // the very first scan looks back this many days
