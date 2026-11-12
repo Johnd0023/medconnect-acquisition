@@ -101,9 +101,18 @@ export async function prospectContacts(settings, page) {
       contacts: { include: { jobTitles: L.jobTitles, locations, existingDataPoints: ['work_email'] } },
       companies: { include: { industriesLabels: L.industriesLabels } },
     },
-    options: { maxContactsPerCompany: L.maxContactsPerCompany, excludeDnc: true },
+    // Plan-dependent options. If Lusha rejects one for this plan, retry without options;
+    // contacts-per-company is also enforced on our side, and DNC phones are never used (email only).
+    options: { maxContactsPerCompany: L.maxContactsPerCompany },
   };
-  const json = await call('POST', '/v3/contacts/prospecting', body);
+  let json;
+  try {
+    json = await call('POST', '/v3/contacts/prospecting', body);
+  } catch (e) {
+    if (!(e instanceof LushaError) || ![400, 403].includes(e.status) || !/plan|support|option|not supported|maxContacts|dnc/i.test(e.message)) throw e;
+    delete body.options;
+    json = await call('POST', '/v3/contacts/prospecting', body);
+  }
   return { results: collectContacts(json.results ?? json).map(normalizeContact).filter(Boolean), pagination: json.pagination || {}, raw: json };
 }
 
