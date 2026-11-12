@@ -39,13 +39,22 @@ export function tokens(text) {
 /** "Chief Executive Officer (CEO)" → both the full title and "CEO". */
 function titleVariants(line) {
   const m = line.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
-  return m ? [m[1], m[2]] : [line];
+  const base = m ? [m[1], m[2]] : [line];
+  const out = [...base];
+  for (const b of base) {
+    // "HR Director" also matches "Director of HR", and the other way round.
+    const tail = b.match(/^(.+?)\s+(director|manager|head|lead|partner|coordinator|specialist|administrator)$/i);
+    if (tail) out.push(`${tail[2]} of ${tail[1]}`);
+    const head = b.match(/^(director|manager|head|vp|vice president|lead)\s+of\s+(.+)$/i);
+    if (head) out.push(`${head[2]} ${head[1]}`);
+  }
+  return out;
 }
 const LEADERSHIP = new Set(['director', 'vice', 'president', 'head', 'chief', 'officer', 'executive']);
 // Words that may sit inside a phrase without changing its meaning.
 const FILLER = new Set(['provider', 'physician', 'advanced', 'practice', 'senior', 'associate', 'assistant', 'interim', 'regional', 'system', 'medical', 'clinical', 'group', 'and']);
 // Non-clinical functions: a title in one of these is never a target, unless it is also about provider recruiting.
-const NON_TARGET_FUNCTION = /\b(data|technology|technical|information|it|security|cyber|engineering|software|digital|innovation|analytics|automation|marketing|communications|brand|branding|sales|commercial|business development|finance|financial|revenue|accounting|tax|treasury|legal|counsel|compliance|procurement|supply chain|facilities|real estate|construction|research|medical affairs|regulatory|investor|product|strategy)\b/;
+const NON_TARGET_FUNCTION = /\b(data|technology|technical|information|it|security|cyber|engineering|software|digital|innovation|analytics|automation|marketing|communications|brand|branding|sales|commercial|business development|finance|financial|revenue|accounting|tax|treasury|legal|counsel|compliance|procurement|supply chain|facilities|real estate|construction|research|medical affairs|regulatory|investor)\b/;
 /** True when the phrase's words appear in the title in the same order, with at most one extra word
  *  between neighbours ("Director of Physician Recruitment" ⊂ "Senior Director of Physician and Provider Recruitment"). */
 const containsAll = (have, need) => {
@@ -136,12 +145,14 @@ export function typeFromCodes(naics = [], sic = []) {
   return naics.length || sic.length ? T.OTHER : null; // has codes, none of them patient care
 }
 
-export function prospectDecision({ companyName, companyDomain, industry, title, departments, aiType, naics, sic }, ctx, inferType) {
+export function prospectDecision({ companyName, companyDomain, industry, title, departments, aiType, naics, sic, careCodeSearch }, ctx, inferType) {
   const s = ctx.settings;
   const pseudo = { name: companyName, norm_name: normName(companyName), domain: normDomain(companyDomain) };
   const byCodes = typeFromCodes(naics, sic);
   let type = byCodes || inferType(companyName, industry);
   if (type === T.UNKNOWN && aiType) type = aiType;
+  // Found by a search limited to patient-care NAICS/SIC codes: the code filter already confirms it's a care provider.
+  if (type === T.UNKNOWN && careCodeSearch) type = T.HS;
   // A staffing-firm name still wins over codes.
   if (inferType(companyName, '') === T.SA) type = T.SA;
   if (protectionMatch(pseudo, ctx)) return { ok: false, reason: 'Skip: current client', type };

@@ -194,7 +194,8 @@ export async function prospectContacts(settings, page) {
     catch (e) { lastErr = e; if (!(e instanceof LushaError) || ![400, 403, 422].includes(e.status)) throw e; }
   }
   if (!json) throw lastErr;
-  return { results: collectContacts(json.results ?? json).map(normalizeContact).filter(Boolean), pagination: json.pagination || {}, raw: json, filterUsed: used, companyFilterSent: companyInclude(L, used) };
+  const confirmed = used === 'naics' || used === 'sic';
+  return { results: collectContacts(json.results ?? json).map(normalizeContact).filter(Boolean).map((c) => ({ ...c, careCodeSearch: confirmed ? used : null })), pagination: json.pagination || {}, raw: json, filterUsed: used, companyFilterSent: companyInclude(L, used) };
 }
 
 /** Ranked decision-makers at known companies (by domain). Returns previews (no emails). */
