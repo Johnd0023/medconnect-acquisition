@@ -24,10 +24,18 @@ export async function loadContext() {
   };
 }
 
+// Recruiters who hire corporate, campus, tech or sales staff are not who MedConnect needs.
+const NON_CLINICAL_RECRUITING = /executive and corporate|corporate (recruit|talent)|early career|campus|university recruit|employer brand|recruitment marketing|talent (marketing|brand)|technology recruit|tech recruit|\bit recruit|engineering recruit|sales recruit|finance recruit|retail recruit|pharmacy recruit|nurse recruit|nursing recruit|rn recruit/;
+// Always relevant, whatever the priority list says.
+const CLINICAL_RECRUITING = /(physician|provider|medical staff|clinician|doctor|advanced practice|app\b)[^,;]*(recruit|staffing|sourcing|services)|(recruit|recruitment)[^,;]*(physician|provider|clinician|advanced practice)/;
+
 export function titleRank(title, ctx) {
   const t = (title || '').toLowerCase();
+  if (!t) return 99;
+  if (NON_CLINICAL_RECRUITING.test(t)) return 99;
+  if (CLINICAL_RECRUITING.test(t)) return 0;
   const i = ctx.titlePriority.findIndex((k) => t.includes(k));
-  return i < 0 ? 99 : i;
+  return i < 0 ? 99 : i + 1;
 }
 
 export function isUsable(c, ctx) {
