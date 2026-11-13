@@ -367,6 +367,7 @@ async function renderPerformance() {
     <div class="kpi"><span class="l">Meetings booked</span><span class="v">${k.meetings}</span><span class="s">marked from replies</span></div>
     <div class="kpi"><span class="l">Lusha credits</span><span class="v">${d.credits.month}</span><span class="s">${d.credits.today} today</span></div>
   </div>
+  ${lushaCard(d.lusha)}
   ${healthCard(d.health)}
   ${engagementCard(d.engagement)}
   ${await emailLogCard()}
@@ -375,6 +376,23 @@ async function renderPerformance() {
 }
 
 const pct = (n, d) => (d ? Math.round((n / d) * 100) + "%" : "—");
+function lushaCard(L) {
+  const b = L.balance && !L.balance.error ? L.balance : null; const n = (x) => Number(x || 0).toLocaleString();
+  const low = /Running low|Out of credits/.test(L.advice); const over = /over your/.test(L.advice);
+  const max = Math.max(5, ...L.days.map((d) => d.credits)); const W = 640, H = 120, pb = 18, bw = (W - 8) / Math.max(L.days.length, 28);
+  const bars = L.days.map((d, i) => { const h = d.credits ? Math.max(2, (d.credits / max) * (H - pb - 8)) : 0; const day = Number(String(d.day).slice(8, 10));
+    return `<rect x="${4 + i * bw + 1}" y="${H - pb - h}" width="${Math.max(2, bw - 2)}" height="${h}" rx="1.5" fill="var(--accent)" opacity="${i === L.days.length - 1 ? 1 : 0.6}"><title>${esc(String(d.day).slice(0, 10))}: ${d.credits} credits</title></rect>${day === 1 || day % 5 === 0 || i === L.days.length - 1 ? `<text x="${4 + i * bw + bw / 2}" y="${H - 4}" text-anchor="middle" font-size="10" fill="var(--muted)">${day}</text>` : ""}`; }).join("");
+  return `<section class="card"><div class="ch"><h2>Lusha credits</h2><div class="actions"><span class="sub">${b ? "Balance checked " + fmtTime(b.checkedAt) : L.balance?.error ? "Couldn't read your Lusha balance: " + esc(L.balance.error) : "Balance not checked yet"}</span><button class="btn sm" data-act="lushaBalance">Refresh balance</button></div></div>
+    <div class="cb"><span class="pill ${low ? "p-bad" : over ? "p-warn" : "p-good"}">${esc(L.advice)}</span></div>
+    <div class="kpis" style="margin:0;padding:0 16px 8px">
+      <div class="kpi"><span class="l">Left in your Lusha account</span><span class="v" style="${low ? "color:var(--bad)" : ""}">${b ? n(b.remaining) : "—"}</span><span class="s">${b ? `of ${n(b.total)} this billing cycle · ${n(b.used)} used` : "Click Refresh balance"}</span></div>
+      <div class="kpi"><span class="l">Used by this app this month</span><span class="v">${n(L.month)}</span><span class="s">${L.budget ? `of your ${n(L.budget)} monthly budget` : ""}</span></div>
+      <div class="kpi"><span class="l">Used today</span><span class="v">${n(L.today)}</span><span class="s">daily reveal limit ${n(L.dailyLimit)}</span></div>
+      <div class="kpi"><span class="l">At this pace</span><span class="v">${L.runway !== null ? n(L.runway) + " days" : "—"}</span><span class="s">${L.runway !== null ? "until your Lusha credits run out" : !b ? "refresh the balance to see" : "no usage in the last 7 days"} · ~${n(L.projected)} by month end</span></div>
+    </div>
+    <div class="cb"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMax meet" style="width:100%;height:150px" role="img" aria-label="Lusha credits used per day this month">${bars}</svg><div class="sub">Credits used per day this month (average ${L.avg7}/day over the last 7 days). To use fewer, lower <b>Daily reveal limit</b> in Settings → Lusha. To keep going, add credits in your Lusha account.</div></div>
+  </section>`;
+}
 function healthCard(hist) {
   const today = hist[hist.length - 1];
   if (!today) return `<section class="card"><div class="ch"><h2>Email health · medconnectstaffing.com</h2><button class="btn sm primary" data-act="runHealth">Run check now</button></div><div class="cb"><div class="empty">Checked automatically every morning at 7:00. Run it now for a first reading.</div></div></section>`;
@@ -723,6 +741,7 @@ document.addEventListener("click", async (ev) => {
         const v = (id) => document.getElementById(id)?.value || "";
         return act(api("/api/contacts", { method: "POST", body: { name: v("nc-name"), title: v("nc-title"), email: v("nc-email"), phone: v("nc-phone"), company: v("nc-company"), website: v("nc-web"), city: v("nc-city"), state: v("nc-state"), notes: v("nc-notes"), outreach: document.getElementById("nc-out")?.checked } }));
       }
+      case "lushaBalance": return act(api("/api/lusha/balance", { method: "POST", body: {} }));
       case "runHealth": { toast("Checking email health…"); return act(api("/api/health/run", { method: "POST", body: {} })); }
       case "addProtected": return act(api("/api/protected", { method: "POST", body: { text: document.getElementById("prot-add").value } }));
       case "disconnect": return act(api("/api/outlook/disconnect", { method: "POST", body: {} }), "Outlook disconnected");

@@ -246,3 +246,10 @@ CREATE TABLE IF NOT EXISTS domain_health (
   details     jsonb NOT NULL,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS lusha_balance (
+  day        date PRIMARY KEY,
+  total      int,
+  used       int,
+  remaining  int,
+  checked_at timestamptz NOT NULL DEFAULT now()
+);

@@ -42,6 +42,28 @@ async function employerRow(e, ctx) {
   };
 }
 
+async function lushaCreditsSummary() {
+  const s = await getSettings();
+  const days = await lusha.dailyCreditsThisMonth();
+  const balance = await lusha.accountBalance().catch((e) => ({ error: e.message }));
+  const month = days.reduce((n, d) => n + d.credits, 0);
+  const today = days.at(-1)?.credits || 0;
+  const last7 = days.slice(-7); const avg7 = last7.length ? last7.reduce((n, d) => n + d.credits, 0) / last7.length : 0;
+  const nowZ = new Date(new Date().toLocaleString('en-US', { timeZone: cfg.timezone }));
+  const daysInMonth = new Date(nowZ.getFullYear(), nowZ.getMonth() + 1, 0).getDate();
+  const daysLeftInMonth = daysInMonth - nowZ.getDate();
+  const projected = Math.round(month + avg7 * daysLeftInMonth);
+  const budget = Number(s.lusha?.monthlyCreditBudget || 0);
+  const remaining = balance && !balance.error && Number.isFinite(balance.remaining) ? balance.remaining : null;
+  const runway = remaining !== null && avg7 > 0 ? Math.floor(remaining / avg7) : null;
+  let advice = 'On track';
+  if (remaining !== null && (remaining <= 0)) advice = 'Out of credits: Lusha lookups have stopped';
+  else if (runway !== null && runway < 14) advice = `Running low: about ${runway} days left at this pace. Buy more credits or lower the daily reveal limit`;
+  else if (remaining !== null && balance.total && remaining / balance.total < 0.1) advice = 'Running low: under 10% of your credits left';
+  else if (budget && projected > budget) advice = `On pace for about ${projected.toLocaleString()} this month, over your ${budget.toLocaleString()} budget. Consider lowering the daily reveal limit`;
+  return { days, today, month, avg7: Math.round(avg7 * 10) / 10, projected, budget, dailyLimit: s.lusha?.dailyRevealLimit, balance, runway, advice };
+}
+
 export const routes = {
   'GET /api/overview': async () => {
     const s = await getSettings();
@@ -301,6 +323,7 @@ export const routes = {
       kpis: Object.fromEntries(Object.entries(k).map(([a, b]) => [a, Number(b)])), bySource, daily, credits: await lusha.creditsUsed(),
       engagement: { all: await engagement(), week: await engagement(7), byStep, opensDaily, machine },
       health: await healthHistory(30),
+      lusha: await lushaCreditsSummary(),
     };
   },
   // Every live email with who received it and what they did (machine opens from security scanners excluded)
@@ -326,6 +349,7 @@ export const routes = {
     const total = Number(rows[0]?.total || 0);
     return { rows: rows.map(({ total: _, ...r }) => r), page, pages: Math.max(1, Math.ceil(total / size)), total, filter };
   },
+  'POST /api/lusha/balance': async () => { const b = await lusha.accountBalance({ force: true }); if (b?.error) throw httpError(502, `Lusha: ${b.error}`); return { ok: true, message: `Lusha: ${b.remaining.toLocaleString()} credits left of ${b.total.toLocaleString()}` }; },
   'POST /api/health/run': async () => { const h = await runHealthCheck(); return { ok: true, message: `Email health: ${h.score}/100 (${h.status})` }; },
 
   'GET /api/settings': async () => {

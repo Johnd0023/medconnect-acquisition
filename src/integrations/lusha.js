@@ -3,7 +3,7 @@
 // Field mapping is defensive and lives in normalizeContact(); run `npm run lusha:check` against your key
 // to print raw responses if Lusha changes a field name.
 import { cfg } from '../config.js';
-import { q, one } from '../db.js';
+import { q, one, kvGet, kvSet } from '../db.js';
 import { normDomain } from '../util.js';
 
 export class LushaError extends Error {
@@ -33,6 +33,37 @@ async function call(method, path, body) {
 async function recordUsage(credits) {
   await q(`INSERT INTO lusha_usage (day, credits, calls) VALUES (current_date, $1, 1)
            ON CONFLICT (day) DO UPDATE SET credits = lusha_usage.credits + EXCLUDED.credits, calls = lusha_usage.calls + 1`, [Math.round(credits)]);
+}
+
+/**
+ * Your Lusha account balance for the current billing cycle: { total, used, remaining, checkedAt }.
+ * Lusha allows 5 balance checks a minute, so the answer is cached for 30 minutes (force = true skips the cache).
+ */
+export async function accountBalance({ force = false } = {}) {
+  const cached = await kvGet('lusha_balance');
+  if (!force && cached && Date.now() - new Date(cached.checkedAt).getTime() < 30 * 60 * 1000) return cached;
+  if (!cfg.lushaApiKey) return cached || null;
+  let r = null;
+  for (const path of ['/v3/account/usage', '/account/usage']) {
+    try {
+      const j = await call('GET', path);
+      const c = j?.credits || j?.usage || j?.data?.credits;
+      if (c && (c.remaining !== undefined || c.total !== undefined)) { r = { total: Number(c.total ?? 0), used: Number(c.used ?? 0), remaining: Number(c.remaining ?? (c.total - c.used)) }; break; }
+    } catch (e) { if (e.status === 401 || e.status === 403) return { ...(cached || {}), error: e.message }; }
+  }
+  if (!r) return cached ? { ...cached, error: 'Lusha did not return a balance' } : { error: 'Lusha did not return a balance' };
+  const out = { ...r, checkedAt: new Date().toISOString() };
+  await kvSet('lusha_balance', out);
+  await q(`INSERT INTO lusha_balance (day, total, used, remaining) VALUES ((now() AT TIME ZONE $4)::date, $1, $2, $3)
+           ON CONFLICT (day) DO UPDATE SET total = EXCLUDED.total, used = EXCLUDED.used, remaining = EXCLUDED.remaining, checked_at = now()`, [r.total, r.used, r.remaining, cfg.timezone]);
+  return out;
+}
+
+/** Credits this app used per day this month (business time zone). */
+export async function dailyCreditsThisMonth() {
+  return q(`SELECT d::date AS day, coalesce(u.credits, 0)::int AS credits
+              FROM generate_series(date_trunc('month', (now() AT TIME ZONE $1))::date, (now() AT TIME ZONE $1)::date, interval '1 day') d
+              LEFT JOIN lusha_usage u ON u.day = d::date ORDER BY d`, [cfg.timezone]);
 }
 
 export async function creditsUsed() {
