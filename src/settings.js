@@ -154,6 +154,17 @@ export const DEFAULT_SETTINGS = {
   senderName: 'MedConnect Business Development',
   companyAddress: '',          // CAN-SPAM: a valid postal address (street, P.O. box or registered mailbox) must appear in every email; shown in the signature
   optOutLine: "P.S. If this isn't relevant, just let me know and I won't follow up.",
+  // --- signature (replaces the sign-off typed at the end of templates) ---
+  signature: {
+    enabled: true,
+    closing: 'Thank you,',
+    name: 'John Duva',
+    title: 'Senior Account Manager',
+    company: 'MedConnect Staffing',
+    phone: 'Direct: (954) 900-8931',
+    tagline: 'Connecting People. Improving Healthcare.',
+    logo: true,
+  },
   // --- brochure: off | link | attach, on the chosen emails (0 = first email, 1-2 = follow-ups) ---
   brochure: {
     mode: 'off',

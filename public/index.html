@@ -477,8 +477,16 @@ async function renderSettings() {
   <section class="card"><div class="ch"><h2>Suppression list</h2><span class="sub">${d.suppressions.length}</span></div>${d.suppressions.length ? `<div class="tablewrap" style="max-height:240px;overflow:auto"><table><tbody>${d.suppressions.map((x) => `<tr><td class="mono">${esc(x.value)}</td><td>${esc(x.reason || "")}</td><td class="n">${fmtShort(x.created_at)}</td><td><button class="btn sm" data-delsupp="${x.id}">Remove</button></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Opt-outs and bounces land here automatically.</div>'}</section>
 
   <section class="card"><div class="ch"><h2>Sender and compliance</h2></div><div class="cb form">
-    <div class="field"><label for="s-sn">Sender name in signature</label><input type="text" id="s-sn" data-path="senderName" data-kind="text" value="${esc(s.senderName)}"></div>
-    <div class="field"><label for="s-addr">Company postal address</label><input type="text" id="s-addr" data-path="companyAddress" data-kind="text" value="${esc(s.companyAddress)}" placeholder="Street, City, State ZIP"><span class="hint">Shown on one line in your signature, under MedConnect Staffing. A P.O. box or registered mailbox is fine. Required by law (CAN-SPAM), so sequences pause until it's set.</span></div>
+    <div class="field"><label><input type="checkbox" data-path="signature.enabled" ${s.signature?.enabled ? "checked" : ""}> Use this signature on every email</label><span class="hint">Replaces whatever sign-off is typed at the end of a template, so it never appears twice.</span></div>
+    <div class="field"><label for="sig-cl">Closing</label><input type="text" id="sig-cl" data-path="signature.closing" data-kind="text" value="${esc(s.signature?.closing || "")}"></div>
+    <div class="field"><label for="sig-n">Name</label><input type="text" id="sig-n" data-path="signature.name" data-kind="text" value="${esc(s.signature?.name || "")}"></div>
+    <div class="field"><label for="sig-t">Title</label><input type="text" id="sig-t" data-path="signature.title" data-kind="text" value="${esc(s.signature?.title || "")}"></div>
+    <div class="field"><label for="sig-c">Company</label><input type="text" id="sig-c" data-path="signature.company" data-kind="text" value="${esc(s.signature?.company || "")}"></div>
+    <div class="field"><label for="sig-p">Phone line</label><input type="text" id="sig-p" data-path="signature.phone" data-kind="text" value="${esc(s.signature?.phone || "")}"></div>
+    <div class="field"><label for="sig-tg">Tagline</label><input type="text" id="sig-tg" data-path="signature.tagline" data-kind="text" value="${esc(s.signature?.tagline || "")}"></div>
+    <div class="field"><label><input type="checkbox" data-path="signature.logo" ${s.signature?.logo ? "checked" : ""}> Show the MedConnect logo</label></div>
+    <div class="field"><label for="s-sn">Sender name for {{sender_name}}</label><input type="text" id="s-sn" data-path="senderName" data-kind="text" value="${esc(s.senderName)}"></div>
+    <div class="field"><label for="s-addr">Company postal address</label><input type="text" id="s-addr" data-path="companyAddress" data-kind="text" value="${esc(s.companyAddress)}" placeholder="Street, City, State ZIP"><span class="hint">Shown in small print at the bottom of your signature. A P.O. box or registered mailbox is fine. Required by law (CAN-SPAM), so sequences pause until it's set.</span></div>
     <div class="field"><label for="s-opt">Opt-out line</label><input type="text" id="s-opt" placeholder="P.S. If this isn't relevant, just let me know and I won't follow up." data-path="optOutLine" data-kind="text" value="${esc(s.optOutLine)}"></div>
   </div></section>
 

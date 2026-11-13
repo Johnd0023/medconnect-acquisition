@@ -92,6 +92,11 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': f.content_type, 'Content-Length': buf.length, 'Content-Disposition': `inline; filename="${f.name.replace(/"/g, '')}"`, 'Cache-Control': 'public, max-age=3600', 'X-Content-Type-Options': 'nosniff', 'X-Robots-Tag': 'noindex, nofollow' });
       return res.end(buf);
     }
+    if (url.pathname === '/email-logo.png') {
+      const img = await readFile(new URL('../public/email-logo.png', import.meta.url));
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=604800' });
+      return res.end(img);
+    }
     if (url.pathname === '/favicon.ico' || url.pathname === '/logo.png') {
       const img = await readFile(new URL('../public/logo.png', import.meta.url));
       res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });

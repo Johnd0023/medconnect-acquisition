@@ -1,6 +1,7 @@
 // Email composition from verified facts only. A template field with no verified value
 // leaves the email unsendable (the sequence pauses) instead of guessing.
-import { toHtml } from './html.js';
+import { toHtml, escapeHtml } from './html.js';
+import { cfg } from '../config.js';
 const FIELD_RE = /\{\{(\w+)\}\}/g;
 const OPTIONAL = new Set(['more_openings', 'brochure']);
 
@@ -71,8 +72,58 @@ export function compose(emp, contact, openings, step, settings, brochure = null)
   if (posting && /@practicematch\.com$/i.test(contact.email) && !/opportunity\s+\S+/i.test(r.subject)) r.subject = `Opportunity ${posting.pm_code} | ${r.subject}`;
   if (!settings.companyAddress) r.missing.push('company_address (Settings → Sender)');
   if (!/[a-z]/i.test(r.subject)) r.missing.push('subject');
+  const sig = settings.signature;
+  if (sig?.enabled) {
+    const main = stripSignOff(r.body, settings);
+    const body = `${main}\n\n${signatureText(settings)}\n\n${optOutLine(settings)}`;
+    const html = htmlFor(main, settings, brochure) + signatureHtml(settings) + `<p style="margin:18px 0 0 0;font-family:Aptos,Calibri,Arial,sans-serif;color:#6b7280;font-size:9.5pt">${escapeHtml(optOutLine(settings))}</p>`;
+    return { ...r, body, html, template: t[key].label, key, attachment: brochure?.attachment?.name || null };
+  }
   const body = withSignature(r.body, settings);
   return { ...r, body, html: htmlFor(body, settings, brochure), template: t[key].label, key, attachment: brochure?.attachment?.name || null };
+}
+
+const optOutLine = (settings) => (!settings.optOutLine || settings.optOutLine === OLD_OPT_OUT ? DEFAULT_OPT_OUT : settings.optOutLine);
+
+/**
+ * Templates often end with a typed sign-off ("John Duva / 954-900-8931 / MedConnect Staffing" or "{{sender_name}}").
+ * With the signature turned on, drop that last block (and a closing like "Thanks,") so it isn't signed twice.
+ */
+export function stripSignOff(text, settings) {
+  const sig = settings.signature || {};
+  const names = [sig.name, settings.senderName, sig.company, 'MedConnect Staffing'].filter(Boolean).map((n) => n.toLowerCase());
+  const paras = text.replace(/\s+$/, '').split(/\n{2,}/);
+  const isSignOff = (p) => {
+    const lines = p.split('\n').map((l) => l.trim()).filter(Boolean);
+    return lines.length > 0 && lines.length <= 6 && lines.every((l) => l.length <= 60)
+      && lines.some((l) => names.includes(l.toLowerCase()) || /^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/.test(l) || /^(direct|cell|phone|mobile)\b/i.test(l));
+  };
+  const isClosing = (p) => /^(thank you|thanks|best|best regards|regards|sincerely|kind regards|warm regards|cheers),?$/i.test(p.trim());
+  while (paras.length > 1 && (isSignOff(paras.at(-1)) || isClosing(paras.at(-1)))) paras.pop();
+  // a closing on the first line of the sign-off block ("Thanks,\nJohn")
+  return paras.join('\n\n');
+}
+
+export function signatureText(settings) {
+  const s = settings.signature || {};
+  return [s.closing, '', [s.name, s.title].filter(Boolean).join('\n'), '', [s.company, s.phone, s.tagline, settings.companyAddress].filter(Boolean).join('\n')]
+    .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+export function signatureHtml(settings) {
+  const s = settings.signature || {}; const e = escapeHtml;
+  const base = 'font-family:Aptos,Calibri,Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.35;color:#1f2328;margin:0';
+  const grey = 'color:#5f6b7a';
+  const tel = (s.phone || '').replace(/[^\d+]/g, '');
+  const phone = s.phone ? (tel.length >= 10 ? `<a href="tel:+1${tel.slice(-10)}" style="${grey};text-decoration:none">${e(s.phone)}</a>` : `<span style="${grey}">${e(s.phone)}</span>`) : '';
+  return `<div style="margin-top:18px">`
+    + (s.closing ? `<p style="${base};margin-bottom:14px">${e(s.closing)}</p>` : '')
+    + `<p style="${base};margin-bottom:14px">${s.name ? `<strong>${e(s.name)}</strong>` : ''}${s.title ? `<br><span style="${grey}">${e(s.title)}</span>` : ''}</p>`
+    + `<p style="${base};margin-bottom:10px">${s.company ? `<strong>${e(s.company)}</strong>` : ''}${phone ? `<br>${phone}` : ''}</p>`
+    + (s.logo ? `<p style="${base};margin-bottom:6px"><a href="https://medconnectstaffing.com" style="text-decoration:none"><img src="${cfg.appUrl}/email-logo.png" width="212" height="53" alt="MedConnect Staffing" style="display:block;border:0;width:212px;height:53px"></a></p>` : '')
+    + (s.tagline ? `<p style="${base};font-size:10pt;margin-bottom:6px">${e(s.tagline)}</p>` : '')
+    + (settings.companyAddress ? `<p style="${base};font-size:9pt;color:#6b7280">${e(settings.companyAddress)}</p>` : '')
+    + `</div>`;
 }
 
 /** HTML version: real bullets, bold lead-ins, short link text, quiet address and P.S. */
