@@ -288,7 +288,7 @@ export const routes = {
         (SELECT count(*) FROM meetings) AS meetings,
         (SELECT count(*) FROM replies WHERE category = 'bounce') AS bounces`);
     const byStep = await q(`SELECT m.step, count(*)::int AS sent,
-        count(*) FILTER (WHERE EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id AND e.kind = 'open' AND NOT e.machine))::int AS opened,
+        count(*) FILTER (WHERE EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id AND e.kind IN ('open','click') AND NOT e.machine))::int AS opened,
         count(*) FILTER (WHERE EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id AND e.kind = 'click' AND NOT e.machine))::int AS clicked,
         count(*) FILTER (WHERE EXISTS (SELECT 1 FROM replies r WHERE r.message_id = m.id AND r.category NOT IN ('ooo','bounce')))::int AS replied
       FROM messages m WHERE m.status = 'sent' AND m.track_token IS NOT NULL GROUP BY m.step ORDER BY m.step`);
@@ -302,6 +302,29 @@ export const routes = {
       engagement: { all: await engagement(), week: await engagement(7), byStep, opensDaily, machine },
       health: await healthHistory(30),
     };
+  },
+  // Every live email with who received it and what they did (machine opens from security scanners excluded)
+  'GET /api/performance/emails': async ({ query }) => {
+    const filter = ['opened', 'unopened', 'clicked', 'replied'].includes(query.filter) ? query.filter : 'all';
+    const where = { all: '', opened: 'AND (x.opens > 0 OR x.clicks > 0)', unopened: 'AND x.opens = 0 AND x.clicks = 0', clicked: 'AND x.clicks > 0', replied: 'AND x.reply IS NOT NULL' }[filter];
+    const size = 50; const page = Math.max(0, Number(query.page) || 0);
+    const rows = await q(`
+      WITH x AS (
+        SELECT m.id, m.step, m.to_email, m.subject, m.sent_at, m.employer_id, e.name AS employer,
+               coalesce(c.full_name, nullif(concat_ws(' ', c.first_name, c.last_name), '')) AS name, c.title,
+               (SELECT count(*) FROM email_events v WHERE v.message_id = m.id AND v.kind = 'open' AND NOT v.machine)::int AS opens,
+               (SELECT min(at) FROM email_events v WHERE v.message_id = m.id AND v.kind = 'open' AND NOT v.machine) AS first_open,
+               (SELECT max(at) FROM email_events v WHERE v.message_id = m.id AND v.kind = 'open' AND NOT v.machine) AS last_open,
+               (SELECT count(*) FROM email_events v WHERE v.message_id = m.id AND v.kind = 'click' AND NOT v.machine)::int AS clicks,
+               (SELECT min(at) FROM email_events v WHERE v.message_id = m.id AND v.kind = 'click' AND NOT v.machine) AS first_click,
+               (SELECT category FROM replies r WHERE r.message_id = m.id AND r.category NOT IN ('ooo','bounce') ORDER BY received_at LIMIT 1) AS reply,
+               (SELECT count(*) FROM replies r WHERE r.message_id = m.id AND r.category = 'bounce')::int AS bounced,
+               m.track_token IS NOT NULL AS tracked
+          FROM messages m JOIN employers e ON e.id = m.employer_id LEFT JOIN contacts c ON c.id = m.contact_id
+         WHERE m.status = 'sent')
+      SELECT *, count(*) OVER () AS total FROM x WHERE true ${where} ORDER BY sent_at DESC LIMIT ${size} OFFSET ${page * size}`);
+    const total = Number(rows[0]?.total || 0);
+    return { rows: rows.map(({ total: _, ...r }) => r), page, pages: Math.max(1, Math.ceil(total / size)), total, filter };
   },
   'POST /api/health/run': async () => { const h = await runHealthCheck(); return { ok: true, message: `Email health: ${h.score}/100 (${h.status})` }; },
 

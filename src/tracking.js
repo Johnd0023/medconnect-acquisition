@@ -45,7 +45,7 @@ export async function recordEvent(token, kind, req) {
 export async function engagement(days = null) {
   const r = await one(`
     SELECT count(*)::int AS sent,
-      count(*) FILTER (WHERE EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id AND e.kind = 'open' AND NOT e.machine))::int AS opened,
+      count(*) FILTER (WHERE EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id AND e.kind IN ('open','click') AND NOT e.machine))::int AS opened,
       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id AND e.kind = 'click' AND NOT e.machine))::int AS clicked,
       count(*) FILTER (WHERE m.track_token IS NOT NULL)::int AS tracked
     FROM messages m WHERE m.status = 'sent' ${days ? `AND m.sent_at >= now() - interval '${Number(days)} days'` : ''}`);

@@ -369,6 +369,7 @@ async function renderPerformance() {
   </div>
   ${healthCard(d.health)}
   ${engagementCard(d.engagement)}
+  ${await emailLogCard()}
   <section class="card chart"><div class="ch"><h2>Daily outreach, last 14 days</h2><div class="legend"><span><i style="background:var(--accent)"></i>Emails sent</span><span><i style="background:var(--good)"></i>Replies</span></div></div><div class="cb">${svg}</div></section>
   <section class="card"><div class="ch"><h2>By source</h2></div><div class="tablewrap"><table><thead><tr><th>Source</th><th>Employers</th><th>Contacted</th><th>Replied</th><th>Positive</th><th>Reply rate</th></tr></thead><tbody>${d.bySource.map((r) => `<tr><td><b>${esc(r.src)}</b></td><td class="n">${r.employers}</td><td class="n">${r.contacted}</td><td class="n">${r.replied}</td><td class="n">${r.positive}</td><td class="n">${Number(r.contacted) ? Math.round((Number(r.replied) / Number(r.contacted)) * 100) + "%" : "—"}</td></tr>`).join("")}</tbody></table></div></section>`;
 }
@@ -389,6 +390,27 @@ function healthCard(hist) {
         <svg viewBox="0 0 ${W} ${H}" style="width:100%;margin-top:14px" role="img" aria-label="Health score, last 30 days">${bars}</svg><div class="sub">Last 30 days</div></div>
       <div>${groups.map((g) => `<div style="margin-bottom:10px"><div class="sub" style="text-transform:uppercase;letter-spacing:.08em;font-size:11px;margin-bottom:4px">${esc(g)}</div>${h.checks.filter((c) => c.group === g).map((c) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:4px 0"><span style="color:${c.points >= c.max ? "var(--good)" : c.points > 0 ? "var(--warn)" : "var(--bad)"};font-weight:700;width:16px">${c.points >= c.max ? "✓" : c.points > 0 ? "!" : "✕"}</span><div style="flex:1"><b style="font-weight:500">${esc(c.label)}</b><div class="sub">${esc(c.detail)}</div></div><span class="sub mono">${c.points}/${c.max}</span></div>`).join("")}</div>`).join("")}</div>
     </div></section>`;
+}
+const REPLY_LABEL = { interested: "Interested", not_now: "Not right now", referral: "Referral", wrong_contact: "Wrong contact", opt_out: "Opted out", other: "Replied" };
+async function emailLogCard() {
+  const f = ui.elog || { filter: "all", page: 0 };
+  const d = await api(`/api/performance/emails?filter=${f.filter}&page=${f.page}`);
+  const steps = ["First email", "Follow-up 1", "Follow-up 2"];
+  const tabs = [["all", "All"], ["opened", "Opened"], ["unopened", "Not opened"], ["clicked", "Clicked brochure"], ["replied", "Replied"]];
+  return `<section class="card"><div class="ch"><h2>Email by email</h2><div class="tabs" role="group" aria-label="Filter emails">${tabs.map(([k, l]) => `<button class="tab" data-elog="${k}" aria-pressed="${f.filter === k}">${l}</button>`).join("")}</div></div>
+    ${d.rows.length ? `<table class="ctable"><colgroup><col style="width:24%"><col style="width:20%"><col style="width:22%"><col style="width:12%"><col style="width:22%"></colgroup>
+      <thead><tr><th>Sent to</th><th>Client</th><th>Email</th><th>Sent</th><th>What happened</th></tr></thead><tbody>${d.rows.map((r) => `<tr>
+        <td><b>${esc(r.name || "—")}</b>${r.title ? `<div class="sub">${esc(r.title)}</div>` : ""}<div class="mono sm">${esc(r.to_email)}</div></td>
+        <td><a href="#performance" data-open="${r.employer_id}">${esc(r.employer)}</a></td>
+        <td>${esc(steps[r.step] || "Email")}<div class="sub">${esc(r.subject)}</div></td>
+        <td class="sm">${fmtTime(r.sent_at)}</td>
+        <td>${r.bounced ? '<span class="pill p-bad">Bounced</span>' : ""}
+          ${r.opens ? `<span class="pill p-info">Opened${r.opens > 1 ? ` ×${r.opens}` : ""}</span><div class="sub">First ${fmtTime(r.first_open)}${r.opens > 1 ? ` · last ${fmtTime(r.last_open)}` : ""}</div>` : r.clicks ? '<span class="pill p-info">Opened</span>' : r.bounced ? "" : `<span class="pill p-mute">${r.tracked ? "Not opened yet" : "Not tracked"}</span>`}
+          ${r.clicks ? `<div><span class="pill p-good">Clicked brochure${r.clicks > 1 ? ` ×${r.clicks}` : ""}</span> <span class="sub">${fmtTime(r.first_click)}</span></div>` : ""}
+          ${r.reply ? `<div><span class="pill p-good">${esc(REPLY_LABEL[r.reply] || "Replied")}</span></div>` : ""}</td></tr>`).join("")}</tbody></table>
+      ${d.pages > 1 ? `<div class="cb" style="display:flex;justify-content:space-between;align-items:center"><button class="btn sm" data-elpage="${d.page - 1}"${d.page <= 0 ? " disabled" : ""}>← Newer</button><span class="sub">Page ${d.page + 1} of ${d.pages} · ${d.total} emails</span><button class="btn sm" data-elpage="${d.page + 1}"${d.page >= d.pages - 1 ? " disabled" : ""}>Older →</button></div>` : ""}`
+      : `<div class="cb"><div class="empty">${f.filter === "all" ? "Live emails appear here as they're sent, with who opened them." : "No emails match this filter yet."}</div></div>`}
+  </section>`;
 }
 function engagementCard(e) {
   const a = e.all, w = e.week; const steps = ["First email", "Follow-up 1", "Follow-up 2"];
@@ -621,7 +643,7 @@ async function renderDrawer() {
   <div class="ds"><h3>${d.previews.length > 1 ? `Emails · ${d.previews.length}` : "Email"}</h3>
   ${d.previews.length ? d.previews.map((p) => `<div class="sub">To <b>${esc(p.names)}</b>${p.to && p.to !== p.names ? ` <span class="mono">${esc(p.to)}</span>` : ""}${p.status ? ` · <span class="pill ${p.status === "active" ? "p-info" : "p-warn"}">${p.status === "active" ? "Next send " + fmtTime(p.nextAt) : esc(p.stopReason || "paused")}</span>` : ` · ${esc(p.template)}`}</div><div class="email${p.html ? " rich" : ""}"><div class="subj">${esc(p.subject)}</div>${p.html || esc(p.body)}${p.attachment ? `<div class="sub" style="margin-top:8px">📎 ${esc(p.attachment)}</div>` : ""}</div>${p.missing.length ? `<span class="pill p-warn">Can't send yet. Missing: ${esc(p.missing.join(", "))}</span>` : ""}`).join("") : (d.seqs.length ? "" : '<p class="sub" style="margin:0">Tick a contact with an email to preview outreach.</p>')}
   ${d.seqs.length ? `<div class="tablewrap"><table><thead><tr><th>Sequence</th><th>Step</th><th>Status</th></tr></thead><tbody>${d.seqs.map((x) => `<tr><td>${esc(x.contactNames)}</td><td class="n">${Math.min(x.step + (x.status === "completed" ? 0 : 1), 3)}/3</td><td><span class="pill ${x.status === "active" ? "p-info" : x.status === "paused" ? "p-warn" : "p-mute"}">${esc(x.status)}</span>${x.stop_reason ? `<div class="sub">${esc(x.stop_reason)}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>` : ""}
-  ${d.messages.length || d.replies.length ? `<div class="tablewrap"><table><tbody>${d.messages.map((m) => `<tr><td class="n">${fmtShort(m.sent_at)}</td><td>${m.step === 0 ? "Initial" : "Follow-up " + m.step}<div class="sub mono">${esc(m.to_email)}</div></td><td>${esc(m.subject)} ${m.status !== "sent" ? `<span class="pill ${m.status === "failed" ? "p-bad" : "p-warn"}">${m.status === "failed" ? "Failed" : "Dry run"}</span>` : ""}${m.opened_at ? ` <span class="pill p-info" title="First opened ${fmtTime(m.opened_at)}">Opened</span>` : ""}${m.clicked_at ? ` <span class="pill p-good" title="Brochure clicked ${fmtTime(m.clicked_at)}">Clicked</span>` : ""}</td></tr>`).join("")}${d.replies.map((r) => `<tr><td class="n">${fmtShort(r.received_at)}</td><td>Reply<div class="sub mono">${esc(r.from_email || "")}</div></td><td><span class="pill ${CAT_PILL[r.category]}">${CAT_LABEL[r.category]}</span> ${esc((r.body_preview || "").slice(0, 160))}</td></tr>`).join("")}</tbody></table></div>` : ""}</div>
+  ${d.messages.length || d.replies.length ? `<div class="tablewrap"><table><tbody>${d.messages.map((m) => `<tr><td class="n">${fmtShort(m.sent_at)}</td><td>${m.step === 0 ? "Initial" : "Follow-up " + m.step}<div class="sub mono">${esc(m.to_email)}</div></td><td>${esc(m.subject)} ${m.status !== "sent" ? `<span class="pill ${m.status === "failed" ? "p-bad" : "p-warn"}">${m.status === "failed" ? "Failed" : "Dry run"}</span>` : ""}${m.opened_at || m.clicked_at ? ` <span class="pill p-info" title="First opened ${fmtTime(m.opened_at || m.clicked_at)}">Opened</span>` : ""}${m.clicked_at ? ` <span class="pill p-good" title="Brochure clicked ${fmtTime(m.clicked_at)}">Clicked</span>` : ""}</td></tr>`).join("")}${d.replies.map((r) => `<tr><td class="n">${fmtShort(r.received_at)}</td><td>Reply<div class="sub mono">${esc(r.from_email || "")}</div></td><td><span class="pill ${CAT_PILL[r.category]}">${CAT_LABEL[r.category]}</span> ${esc((r.body_preview || "").slice(0, 160))}</td></tr>`).join("")}</tbody></table></div>` : ""}</div>
   <div class="ds"><h3>Notes</h3>${(e.notes || []).map((n) => `<div class="sub">${fmtShort(n.at)}: ${esc(n.text)}</div>`).join("")}<div style="display:flex;gap:8px"><input type="text" id="note-in" placeholder="Add a qualification note"><button class="btn sm" data-emp="${e.id}" data-a="note">Add</button></div></div>
   <div class="ds"><h3>History</h3><ul class="timeline">${d.events.map((h) => `<li><span class="t">${fmtShort(h.at)}</span><span>${esc(h.text)}</span></li>`).join("")}</ul></div>
   </aside>`;
@@ -737,6 +759,8 @@ document.addEventListener("click", async (ev) => {
       }
     }
   }
+  const el = t.closest("[data-elog]"); if (el) { ui.elog = { filter: el.dataset.elog, page: 0 }; return renderAll(); }
+  const ep = t.closest("[data-elpage]"); if (ep && !ep.disabled) { ui.elog = { ...(ui.elog || { filter: "all" }), page: Number(ep.dataset.elpage) }; return renderAll(); }
   const cp = t.closest("[data-cpage]"); if (cp && !cp.disabled) { ui.cpage = Number(cp.dataset.cpage); await renderAll(); return window.scrollTo(0, 0); }
   const o = t.closest("[data-open]"); if (o && !t.closest("button")) { ev.preventDefault(); ui.drawer = o.dataset.open; return renderDrawer().catch((e) => toast(e.message, true)); }
 });
