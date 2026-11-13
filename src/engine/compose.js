@@ -1,5 +1,6 @@
 // Email composition from verified facts only. A template field with no verified value
 // leaves the email unsendable (the sequence pauses) instead of guessing.
+import { toHtml } from './html.js';
 const FIELD_RE = /\{\{(\w+)\}\}/g;
 const OPTIONAL = new Set(['more_openings', 'brochure']);
 
@@ -70,5 +71,22 @@ export function compose(emp, contact, openings, step, settings, brochure = null)
   if (posting && /@practicematch\.com$/i.test(contact.email) && !/opportunity\s+\S+/i.test(r.subject)) r.subject = `Opportunity ${posting.pm_code} | ${r.subject}`;
   if (!settings.companyAddress) r.missing.push('company_address (Settings → Sender)');
   if (!/[a-z]/i.test(r.subject)) r.missing.push('subject');
-  return { ...r, body: withSignature(r.body, settings), template: t[key].label, key, attachment: brochure?.attachment?.name || null };
+  const body = withSignature(r.body, settings);
+  return { ...r, body, html: htmlFor(body, settings, brochure), template: t[key].label, key, attachment: brochure?.attachment?.name || null };
+}
+
+/** HTML version: real bullets, bold lead-ins, short link text, quiet address and P.S. */
+export function htmlFor(body, settings, brochure) {
+  let text = body;
+  const url = brochure?.url;
+  if (url) {
+    const u = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // "...brochure here: <url>" → "...brochure here." with "here" as the link
+    text = text.replace(new RegExp(`\\b(here|below)\\s*:?\\s*${u}([.!]?)`, 'gi'), (_, w, p) => `[${w}](${url})${p || '.'}`);
+  }
+  const optOut = body.trim().split('\n').at(-1);
+  return toHtml(text, {
+    linkLabels: url ? { [url]: 'MedConnect client brochure (PDF)' } : {},
+    quietLines: [settings.companyAddress, /^p\.?s\.?\b/i.test(optOut) || /follow up|unsubscribe|hear from me/i.test(optOut) ? optOut : null],
+  });
 }

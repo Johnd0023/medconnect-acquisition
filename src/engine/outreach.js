@@ -171,8 +171,8 @@ export async function sendTick({ force = false } = {}) {
     try {
       const prev = seq.step > 0 ? await one(`SELECT internet_message_id FROM messages WHERE sequence_id = $1 AND status = 'sent' ORDER BY sent_at DESC LIMIT 1`, [seq.id]) : null;
       result = seq.step === 0
-        ? await outlook.sendNew({ to: toList, subject: m.subject, body: m.body, attachments })
-        : await outlook.sendFollowUp({ to: toList, previousInternetMessageId: prev?.internet_message_id, body: m.body, fallbackSubject: m.subject, attachments });
+        ? await outlook.sendNew({ to: toList, subject: m.subject, body: m.body, html: m.html, attachments })
+        : await outlook.sendFollowUp({ to: toList, previousInternetMessageId: prev?.internet_message_id, body: m.body, html: m.html, fallbackSubject: m.subject, attachments });
     } catch (e) {
       error = e.message;
       if (e.status === 401 || e.status === 403 || e.code === 'NotConnected' || e.code === 'invalid_grant' || e.code === 'ErrorAccessDenied' || e.code === 'ErrorExceededMessageLimit' || e.code === 'ErrorSubmissionQuotaExceeded') {

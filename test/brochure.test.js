@@ -56,6 +56,14 @@ test('brochure as a link or an attachment', async () => {
   const m = compose(emp, contact, [], 0, s, link);
   assert.ok(m.body.indexOf(link.url) > 0 && m.body.indexOf(link.url) < m.body.indexOf('John Duva'), 'link sits above the signature');
   assert.equal(m.attachment, null);
+  // HTML version: short link text instead of the long address, quiet address line
+  assert.ok(m.html.includes(`href="${link.url}"`) && !m.html.includes(`>${link.url}<`), 'brochure URL hidden behind short link text');
+  assert.match(m.html, /color:#6b7280[^>]*>1440 Coral Ridge/);
+  const { toHtml } = await import('../src/engine/html.js');
+  const h = toHtml('Intro\n\n- Nationwide Reach – We recruit beyond job boards.\n- Plain bullet <b>\n\nSee [our brochure](https://x.test/b) or https://x.test/a.');
+  assert.match(h, /<ul[^>]*><li[^>]*><strong>Nationwide Reach<\/strong> – We recruit/);
+  assert.ok(h.includes('Plain bullet &lt;b&gt;'), 'text is escaped');
+  assert.ok(h.includes('<a href="https://x.test/b"') && h.includes('>our brochure</a>') && h.includes('>https://x.test/a</a>.'));
 
   // Own link instead of the uploaded file
   await saveSettings({ brochure: { url: 'https://medconnectstaffing.com/brochure.pdf' } });
@@ -77,6 +85,8 @@ test('brochure as a link or an attachment', async () => {
   await outlook.sendNew({ to: [{ address: 'drew@cedarvalleyfm.com' }], subject: 'Hi', body: 'x', attachments: [att.attachment] });
   const draft = calls.find((c) => c.path === '/v1.0/me/messages' && c.method === 'POST');
   assert.equal(draft.body.attachments[0].name, 'MedConnect Brochure.pdf');
+  await outlook.sendNew({ to: [{ address: 'a@b.org' }], subject: 'Hi', body: 'x', html: '<p>x</p>' });
+  assert.equal(calls.filter((c) => c.path === '/v1.0/me/messages' && c.method === 'POST').at(-1).body.body.contentType, 'HTML');
   assert.equal(draft.body.attachments[0]['@odata.type'], '#microsoft.graph.fileAttachment');
   await outlook.sendFollowUp({ to: [{ address: 'drew@cedarvalleyfm.com' }], previousInternetMessageId: '<m1@mc>', body: 'y', fallbackSubject: 'Hi', attachments: [att.attachment] });
   assert.ok(calls.some((c) => c.path === '/v1.0/me/messages/r1/attachments' && c.body.contentBytes === PDF), 'attachment added to the reply');

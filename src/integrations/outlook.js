@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { cfg } from '../config.js';
 import { q, one, kvGet, kvSet } from '../db.js';
 import { encrypt, decrypt } from '../util.js';
+import { innerBody, escapeHtml } from '../engine/html.js';
 
 const SCOPES = 'offline_access openid profile email User.Read Mail.Send Mail.ReadWrite';
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -102,10 +103,10 @@ const recipientsOf = (to, toName) => (Array.isArray(to) ? to : [{ address: to, n
 
 const fileAttachments = (list) => (list || []).map((a) => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: a.name, contentType: a.contentType, contentBytes: a.contentBytes }));
 
-export async function sendNew({ to, toName, subject, body, attachments }) {
+export async function sendNew({ to, toName, subject, body, html, attachments }) {
   const draft = await graph('POST', '/me/messages', {
     subject,
-    body: { contentType: 'Text', content: body },
+    body: html ? { contentType: 'HTML', content: html } : { contentType: 'Text', content: body },
     toRecipients: recipientsOf(to, toName),
     ...(attachments?.length ? { attachments: fileAttachments(attachments) } : {}),
   });
@@ -114,20 +115,26 @@ export async function sendNew({ to, toName, subject, body, attachments }) {
 }
 
 /** Send a follow-up as a reply in the same thread as the earlier message (found by its Internet Message-ID). */
-export async function sendFollowUp({ to, toName, previousInternetMessageId, body, fallbackSubject, attachments }) {
+export async function sendFollowUp({ to, toName, previousInternetMessageId, body, html, fallbackSubject, attachments }) {
   let original = null;
   if (previousInternetMessageId) {
     const filter = encodeURIComponent(`internetMessageId eq '${previousInternetMessageId.replace(/'/g, "''")}'`);
     const found = await graph('GET', `/me/mailFolders/sentitems/messages?$filter=${filter}&$select=${SELECT},body,sentDateTime&$top=1`);
     original = found.value?.[0] || null;
   }
-  if (!original) return sendNew({ to, toName, subject: fallbackSubject, body, attachments });
+  if (!original) return sendNew({ to, toName, subject: fallbackSubject, body, html, attachments });
   const reply = await graph('POST', `/me/messages/${encodeURIComponent(original.id)}/createReply`, {});
   const sent = new Date(original.sentDateTime).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+  const origHtml = (original.body?.contentType || '').toLowerCase() === 'html'
+    ? innerBody(original.body.content)
+    : escapeHtml(original.body?.content || '').replace(/\n/g, '<br>');
+  const content = html
+    ? `${html}<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#1f2328;margin-top:18px">On ${escapeHtml(sent)}, I wrote:</div><blockquote style="margin:6px 0 0 0;padding-left:12px;border-left:2px solid #d0d7de;color:#57606a">${origHtml}</blockquote>`
+    : null;
   const quoted = (original.body?.content || '').split('\n').map((l) => `> ${l}`).join('\n');
   await graph('PATCH', `/me/messages/${encodeURIComponent(reply.id)}`, {
     toRecipients: recipientsOf(to, toName),
-    body: { contentType: 'Text', content: `${body}\n\nOn ${sent}, I wrote:\n${quoted}` },
+    body: content ? { contentType: 'HTML', content } : { contentType: 'Text', content: `${body}\n\nOn ${sent}, I wrote:\n${quoted}` },
   });
   for (const a of fileAttachments(attachments)) await graph('POST', `/me/messages/${encodeURIComponent(reply.id)}/attachments`, a);
   await graph('POST', `/me/messages/${encodeURIComponent(reply.id)}/send`);
