@@ -43,10 +43,12 @@ export async function brochureBySlug(slug) {
  */
 export async function brochureFor(step, settings, { lineOnly = false } = {}) {
   const b = settings.brochure || {};
-  if (!b.mode || b.mode === 'off' || !(b.steps || []).includes(step)) return null;
   const meta = await brochureMeta();
+  const link = (b.url || '').trim() || publicUrl(meta);
+  // A template can always use {{brochure_url}} directly; the automatic sentence only goes on the chosen emails.
+  if (!b.mode || b.mode === 'off' || !(b.steps || []).includes(step)) return link ? { url: link } : null;
   if (b.mode === 'link') {
-    const url = (b.url || '').trim() || publicUrl(meta);
+    const url = link;
     if (!url) return null;
     return { line: (b.linkLine || DEFAULT_LINK_LINE).replace(/\{\{\s*brochure_url\s*\}\}/g, url), url };
   }
@@ -54,7 +56,7 @@ export async function brochureFor(step, settings, { lineOnly = false } = {}) {
     if (!meta) return null;
     const attachment = { name: meta.name, contentType: meta.content_type };
     if (!lineOnly) attachment.contentBytes = (await one(`SELECT data FROM files WHERE kind = 'brochure'`)).data;
-    return { line: b.attachLine || DEFAULT_ATTACH_LINE, attachment };
+    return { line: b.attachLine || DEFAULT_ATTACH_LINE, attachment, url: link };
   }
   return null;
 }

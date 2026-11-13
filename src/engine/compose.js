@@ -56,9 +56,9 @@ export function compose(emp, contact, openings, step, settings, brochure = null)
   const t = settings.templates;
   const hasOpening = openings.some((o) => o.active);
   const key = step === 0 ? (hasOpening ? 'initial_opening' : 'initial_general') : step === 1 ? 'followup_1' : 'followup_2';
-  const r = render(t[key], { ...fieldsFor(emp, contact, openings, settings), brochure: brochure?.line || '' });
+  const r = render(t[key], { ...fieldsFor(emp, contact, openings, settings), brochure: brochure?.line || '', brochure_url: brochure?.url || '' });
   // Brochure line: where the template puts {{brochure}}, otherwise as its own paragraph just above the sign-off
-  if (brochure?.line && !/\{\{\s*brochure\s*\}\}/.test(t[key].body)) {
+  if (brochure?.line && !/\{\{\s*brochure(_url)?\s*\}\}/.test(t[key].body)) {
     const paras = r.body.replace(/\s+$/, '').split(/\n{2,}/);
     paras.splice(Math.max(1, paras.length - 1), 0, brochure.line);
     r.body = paras.join('\n\n');

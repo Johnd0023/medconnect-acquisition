@@ -42,14 +42,17 @@ test('brochure as a link or an attachment', async () => {
   const contact = { email: 'drew@cedarvalleyfm.com', first_name: 'Drew' };
 
   // Off by default
-  assert.equal(await brochureFor(0, await getSettings()), null);
+  const off = await brochureFor(0, await getSettings());
+  assert.ok(off.url && !off.line, 'off: no automatic sentence, but {{brochure_url}} still works');
+  const own = compose(emp, contact, [], 0, { ...(await getSettings()), templates: { ...(await getSettings()).templates, initial_general: { label: 'x', subject: 'Hi', body: 'Hi {{first_name}},\n\nOur brochure: {{brochure_url}}\n\n{{sender_name}}' } } }, off);
+  assert.ok(own.body.includes(off.url) && !own.missing.length, 'template link filled in');
 
   // Link on the first email only, inserted above the sign-off
   await saveSettings({ brochure: { mode: 'link', steps: [0] } });
   let s = await getSettings();
   const link = await brochureFor(0, s);
   assert.match(link.line, /\/b\/[\w-]+\/MedConnect%20Brochure\.pdf$/);
-  assert.equal(await brochureFor(1, s), null, 'follow-ups not chosen');
+  assert.equal((await brochureFor(1, s)).line, undefined, 'follow-ups not chosen: no sentence added');
   const m = compose(emp, contact, [], 0, s, link);
   assert.ok(m.body.indexOf(link.url) > 0 && m.body.indexOf(link.url) < m.body.indexOf('John Duva'), 'link sits above the signature');
   assert.equal(m.attachment, null);
