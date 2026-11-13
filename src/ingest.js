@@ -6,7 +6,7 @@ import { validToken } from './collector.js';
 import { toRow } from './integrations/practicematch.js';
 import { importListings } from './engine/discovery.js';
 import { requalifyAll } from './engine/qualify.js';
-import { enroll } from './engine/outreach.js';
+import { enroll, autoEnrollReady } from './engine/outreach.js';
 import { fillNamesFromEmail } from './contacts.js';
 
 export const ALLOWED_ORIGINS = ['https://www.practicematch.com', 'https://practicematch.com'];
@@ -57,7 +57,7 @@ export async function handleIngest(path, body, token) {
     const acc = (await kvGet('pm_browser_run')) || {};
     await requalifyAll();
     let enrolled = 0;
-    if (!s.supervised && s.autoEnroll && !s.paused) for (const { id } of await q(`SELECT id FROM employers WHERE bucket = 'ready'`)) { try { await enroll(id, { by: 'auto' }); enrolled++; } catch { /* skip */ } }
+    enrolled = (await autoEnrollReady()).enrolled || 0;
     const summary = { ...acc, mode: 'browser', enrolled, log: [`Browser scan: ${body.listed || 0} postings, ${body.fresh || 0} new, ${body.read || 0} read, ${body.sent || 0} added${body.skipped ? `, ${body.skipped} skipped` : ''}${body.errors ? `, ${body.errors} errors` : ''}`] };
     if (acc.id) await q(`UPDATE job_runs SET finished_at = now(), status = $2, summary = $3::jsonb WHERE id = $1`, [acc.id, body.error ? 'error' : 'ok', JSON.stringify(body.error ? { ...summary, error: str(body.error) } : summary)]);
     return { ok: true };

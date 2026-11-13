@@ -61,6 +61,8 @@ MedConnect Staffing`,
 
 export const DEFAULT_SETTINGS = {
   // --- automation ---
+  // Postings that say "no agencies": false = treat like any other posting (owner has an agreement to reach out)
+  respectNoAgency: false,
   supervised: true,            // every qualified employer waits for owner approval
   paused: false,               // stops sending + auto-enroll; discovery keeps running
   autoEnrich: true,            // use Lusha to find a contact when a listing has none

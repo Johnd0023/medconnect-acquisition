@@ -8,7 +8,7 @@ import { engagement } from './tracking.js';
 import { runHealthCheck, healthHistory } from './health.js';
 import { listContacts, updateContact, createContact, exportContacts, STATUSES } from './contacts.js';
 import { brochureFor, brochureMeta, publicUrl, saveBrochure, deleteBrochure } from './brochure.js';
-import { enroll, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
+import { enroll, readyIds, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
 import { runDiscovery, importListings, lushaFillContacts, resolveIndustries, runPracticeMatchScan } from './engine/discovery.js';
 import { pollReplies, referralFrom } from './engine/replies.js';
 import { addContact, inferType } from './engine/ingest.js';
@@ -81,7 +81,7 @@ export const routes = {
       now: new Date(), timezone: cfg.timezone, counts, fresh: await Promise.all(fresh.map(async (e) => employerRow(e, ctxAll))),
       lastRun, lastScan, send: { ...st, settings: undefined, due }, totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, Number(v)])),
       credits: await lusha.creditsUsed(), budget: s.lusha.monthlyCreditBudget,
-      mode: { supervised: s.supervised, paused: s.paused, dryRun: cfg.dryRun },
+      mode: { supervised: s.supervised, paused: s.paused, dryRun: cfg.dryRun, threshold: s.threshold, autoEnroll: s.autoEnroll },
     };
   },
 
@@ -218,7 +218,7 @@ export const routes = {
       return { ok: true, message: `${n} approved. They're in Ready; enroll them when you're set.` };
     }
     if (body.action === 'enrollReady') {
-      for (const { id } of await q(`SELECT id FROM employers WHERE bucket = 'ready' ORDER BY score DESC NULLS LAST`)) { try { await enroll(id); n++; } catch { /* skip */ } }
+      for (const { id } of await readyIds()) { try { await enroll(id); n++; } catch { /* skip */ } }
       return { ok: true, message: `${n} enrolled.` };
     }
     throw httpError(400, 'Unknown bulk action');

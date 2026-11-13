@@ -309,6 +309,7 @@ async function renderQueue() {
   const bulk = ui.queueTab === "ready" && list.length ? `<button class="btn primary" data-act="bulk" data-v="enrollReady">Enroll all ${list.length}</button>`
     : ui.queueTab === "review" && list.some((e) => e.status === "qualified" && !e.decision) ? `<button class="btn" data-act="bulk" data-v="approveClean">Approve all with no flags (${list.filter((e) => e.status === "qualified" && !e.decision).length})</button>` : "";
   return modeBanner(ui.overview?.mode) + `<div class="head"><div><h1>Prospect Queue</h1><p>One record per employer. Several openings at the same employer are consolidated, so one decision-maker gets one sequence.</p></div><div class="actions"><input type="text" id="qsearch" placeholder="Search employers" value="${esc(search)}" style="width:200px">${bulk}</div></div>
+  ${ui.queueTab === "ready" && ui.overview?.mode && !ui.overview.mode.supervised ? `<div class="banner" style="margin-bottom:12px;background:var(--accent-soft);border-color:transparent"><b>Automated:</b>&nbsp;Ready clients scoring ${esc(ui.overview.mode.threshold ?? 70)}+ are enrolled automatically every 15 minutes.</div>` : ""}
   <div class="tabs" role="group" aria-label="Queue">${tabs.map(([k, l]) => `<button class="tab" aria-pressed="${ui.queueTab === k}" data-tab="${k}">${l}<span class="c">${c[k] || 0}</span></button>`).join("")}</div>
   <section class="card">${list.length ? `<div class="tablewrap"><table><thead><tr><th>Employer</th><th>Hiring signal</th><th>Contact</th><th>Status</th><th>Score</th><th></th></tr></thead><tbody>${list.map((e) => {
     const rs = e.bucket === "outreach" ? (e.sequence?.stopReason ? [e.sequence.stopReason] : []) : e.reasons || [];
@@ -489,6 +490,7 @@ async function renderSettings() {
     ${num("s-wsi", "warmup.increasePerDay", s.warmup.increasePerDay, "Warm-up: add per day", "", 0, 100)}
     ${num("s-gmin", "minGapSeconds", s.minGapSeconds, "Spacing: minimum seconds between emails", "", 0, 3600)}
     ${num("s-gmax", "maxGapSeconds", s.maxGapSeconds, "Spacing: maximum seconds", "", 0, 7200)}
+    <div class="field"><label><input type="checkbox" data-path="respectNoAgency" ${s.respectNoAgency ? "checked" : ""}> Hold postings that say "no agencies"</label><span class="hint">Off: those postings are emailed like any other (you have agreements in place). On: they wait in Review for you.</span></div>
     <div class="field"><label for="s-mc">When a client has several contacts</label><select id="s-mc" data-path="multiContact" data-kind="text">
       <option value="separate" ${(s.multiContact || "separate") === "separate" ? "selected" : ""}>Separate email to each, about their own postings</option>
       <option value="together" ${s.multiContact === "together" ? "selected" : ""}>One email to all of them together</option>

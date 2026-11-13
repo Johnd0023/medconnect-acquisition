@@ -7,7 +7,7 @@ import { getSettings } from './settings.js';
 import { zoned, hhmmToMin } from './util.js';
 import { runDiscovery, runPracticeMatchScan } from './engine/discovery.js';
 import { pollReplies } from './engine/replies.js';
-import { sendTick } from './engine/outreach.js';
+import { sendTick, autoEnrollReady } from './engine/outreach.js';
 import { runHealthCheck } from './health.js';
 
 const running = new Set();
@@ -52,6 +52,11 @@ export async function tick(now = new Date()) {
 
   if (minutes >= hhmmToMin(s.healthCheckTime || '07:00')) {
     await guarded('health', () => runJob('health', z.ymd, () => runHealthCheck().then((h) => ({ score: h.score, status: h.status }))));
+  }
+
+  // Automated mode: enroll Ready employers at or above the score threshold, every 15 minutes
+  if (!s.supervised && s.autoEnroll && !s.paused) {
+    await guarded('auto-enroll', () => runJob('auto-enroll', `${z.ymd}#${Math.floor(minutes / 15)}`, () => autoEnrollReady()));
   }
 
   const slot = Math.floor(minutes / Math.max(1, s.replyPollMinutes));

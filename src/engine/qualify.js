@@ -254,7 +254,7 @@ export function evaluate(emp, openings, contacts, seqs, ctx) {
     else {
       const active = openings.filter((o) => o.active);
       const restr = active.find((o) => o.restriction);
-      if (restr) reasons.push(`Listing ${restr.external_id} says: "${restr.restriction}"`);
+      if (restr && s.respectNoAgency) reasons.push(`Listing ${restr.external_id} says: "${restr.restriction}"`);
       if (emp.type === T.UNKNOWN) reasons.push('Could not determine employer type');
       else if (!s.types.includes(emp.type)) reasons.push(`Employer type not targeted: ${emp.type}`);
       if (active.length && !active.some((o) => s.specialties.some((sp) => (o.specialty || '').toLowerCase().includes(sp.toLowerCase())))) {

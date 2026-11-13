@@ -8,7 +8,7 @@ import * as lusha from '../integrations/lusha.js';
 import * as pm from '../integrations/practicematch.js';
 import { ingestListing, ingestLushaContact, addContact, inferType } from './ingest.js';
 import { loadContext, requalify, requalifyAll, titleRank, prospectDecision } from './qualify.js';
-import { enroll } from './outreach.js';
+import { enroll, autoEnrollReady } from './outreach.js';
 import { normName, normDomain } from '../util.js';
 import { classifyEmployer } from '../integrations/ai.js';
 import { EMPLOYER_TYPES as T } from '../settings.js';
@@ -176,7 +176,7 @@ export async function runPracticeMatchScan({ requalifyAfter = true, autoEnroll =
   if (requalifyAfter) await requalifyAll();
   let enrolled = 0;
   if (autoEnroll && !settings.supervised && settings.autoEnroll && !settings.paused) {
-    for (const { id } of await q(`SELECT id FROM employers WHERE bucket = 'ready' ORDER BY score DESC NULLS LAST`)) { try { await enroll(id, { by: 'auto' }); enrolled++; } catch { /* skip */ } }
+    enrolled = (await autoEnrollReady()).enrolled || 0;
   }
   return { ...r, enrolled, log: logs.slice(-6) };
 }
@@ -206,9 +206,7 @@ export async function runDiscovery({ trigger = 'schedule' } = {}) {
 
   // 5. Auto-enroll when supervised launch is off
   if (!settings.supervised && settings.autoEnroll && !settings.paused) {
-    for (const { id } of await q(`SELECT id FROM employers WHERE bucket = 'ready' ORDER BY score DESC NULLS LAST`)) {
-      try { await enroll(id, { by: 'auto' }); sum.enrolled++; } catch { /* skip */ }
-    }
+    sum.enrolled += (await autoEnrollReady()).enrolled || 0;
   }
 
   // 6. Openings not seen by the monitor in 30 days are treated as filled

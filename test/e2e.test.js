@@ -69,7 +69,7 @@ test('full pipeline', async () => {
   await q('TRUNCATE employers, openings, contacts, sequences, messages, replies, suppressions, protected_accounts, tasks, events, job_runs, lusha_usage, oauth_tokens, kv, meetings RESTART IDENTITY CASCADE');
   await q(`UPDATE settings SET data = '{}'::jsonb`); invalidateSettings();
   await routes['POST /api/protected']({ body: { text: 'Riverbend Health System | riverbendhealth.org' } });
-  await saveSettings({ lusha: { prospectingEnabled: true }, practicematch: { enabled: false }, companyAddress: '100 Main St, Columbus, OH 43215', sendDays: [0, 1, 2, 3, 4, 5, 6], sendWindowStart: '00:00', sendWindowEnd: '23:59', minGapSeconds: 0, maxGapSeconds: 0, warmup: { enabled: true, startPerDay: 3, increasePerDay: 2 } });
+  await saveSettings({ respectNoAgency: true, lusha: { prospectingEnabled: true }, practicematch: { enabled: false }, companyAddress: '100 Main St, Columbus, OH 43215', sendDays: [0, 1, 2, 3, 4, 5, 6], sendWindowStart: '00:00', sendWindowEnd: '23:59', minGapSeconds: 0, maxGapSeconds: 0, warmup: { enabled: true, startPerDay: 3, increasePerDay: 2 } });
 
   // --- PracticeMatch import ---
   const rows = pm.parseImport(CSV);

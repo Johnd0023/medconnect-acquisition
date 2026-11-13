@@ -20,6 +20,27 @@ async function alreadyContacted(c) {
 }
 
 /** Enroll a client's selected contacts. Returns the contacts enrolled. */
+// With "respect no-agency postings" on, those employers are never enrolled automatically or in bulk.
+const notRestricted = (s) => (s.respectNoAgency ? `NOT EXISTS (SELECT 1 FROM openings o WHERE o.employer_id = employers.id AND o.active AND o.restriction IS NOT NULL)` : 'true');
+
+/**
+ * Automated mode: enroll every Ready employer scoring at or above the threshold (default 70).
+ * Skips "no agencies" postings. Sends still follow the daily cap, warm-up and send window.
+ */
+export async function autoEnrollReady() {
+  const s = await getSettings();
+  if (s.supervised || !s.autoEnroll || s.paused) return { enrolled: 0, skipped: 0, reason: 'Automated enrolling is off' };
+  const rows = await q(`SELECT id FROM employers WHERE bucket = 'ready' AND coalesce(score, 0) >= $1 AND ${notRestricted(s)} ORDER BY score DESC NULLS LAST, last_signal DESC`, [s.threshold]);
+  let enrolled = 0; let skipped = 0;
+  for (const { id } of rows) { try { await enroll(id, { by: 'auto' }); enrolled++; } catch { skipped++; } }
+  return { enrolled, skipped };
+}
+
+export async function readyIds({ minScore = 0 } = {}) {
+  const s = await getSettings();
+  return q(`SELECT id FROM employers WHERE bucket = 'ready' AND coalesce(score, 0) >= $1 AND ${notRestricted(s)} ORDER BY score DESC NULLS LAST`, [minScore]);
+}
+
 export async function enroll(employerId, { by = 'owner' } = {}) {
   const ctx = await loadContext();
   const r = await requalify(employerId, ctx);
