@@ -302,6 +302,22 @@ export const routes = {
     return { ok: true, settings: s };
   },
 
+  // Live preview of a template being edited, filled with sample data, exactly as the email will look
+  'POST /api/templates/preview': async ({ body }) => {
+    const s = await getSettings();
+    const key = s.templates[body.key] ? body.key : 'initial_opening';
+    const step = key === 'followup_1' ? 1 : key === 'followup_2' ? 2 : 0;
+    const settings = { ...s, templates: { ...s.templates, [key]: { ...s.templates[key], subject: String(body.subject ?? s.templates[key].subject), body: String(body.body ?? s.templates[key].body) } } };
+    const emp = { id: 0, name: 'Riverside Regional Medical Center', type: 'HS', city: 'Dallas', state: 'TX', domain: 'riversideregional.org' };
+    const openings = key === 'initial_general' ? [] : [
+      { active: true, specialty: 'Cardiology', role: 'Physician', title: 'Cardiology Physician', city: 'Dallas', state: 'TX', posted_at: new Date().toISOString(), contact_email: 'liz@riversideregional.org' },
+      { active: true, specialty: 'Hospitalist', role: 'Physician', city: 'Dallas', state: 'TX', posted_at: new Date(Date.now() - 864e5).toISOString() },
+      { active: true, specialty: 'Family Medicine', role: 'Nurse Practitioner', city: 'Plano', state: 'TX', posted_at: new Date(Date.now() - 2 * 864e5).toISOString() },
+    ];
+    const bro = await brochureFor(step, settings, { lineOnly: true });
+    const m = compose(emp, { email: 'liz@riversideregional.org', first_name: 'Liz' }, openings, step, settings, bro);
+    return { subject: m.subject, html: m.html, missing: m.missing, attachment: m.attachment };
+  },
   'POST /api/brochure': async ({ body }) => {
     const m = await saveBrochure(body);
     return { ok: true, message: `${m.name} uploaded (${(m.size / 1048576).toFixed(1)} MB)` };

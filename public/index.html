@@ -132,6 +132,10 @@ td .sub{color:var(--muted);font-size:12.5px}
 .email{border:1px solid var(--line);border-radius:10px;background:var(--sunk);padding:14px 16px;font-size:13.5px;white-space:pre-wrap}
 .email .subj{font-weight:600;margin-bottom:8px;white-space:normal}
 .email.rich{white-space:normal;background:#fff}
+.tpl-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:1100px){.tpl-grid{grid-template-columns:1fr}}
+textarea.prose{font-family:inherit;font-size:13.5px;line-height:1.55}
+#tpl-preview{max-height:640px;overflow:auto}
 .email.rich .subj{padding-bottom:8px;border-bottom:1px solid var(--line);margin-bottom:12px}
 .timeline{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13px}
 .timeline li{display:grid;grid-template-columns:86px 1fr;gap:8px}
@@ -503,10 +507,12 @@ async function renderSettings() {
     <div class="field"><label for="s-bal">Attachment sentence</label><input type="text" id="s-bal" data-path="brochure.attachLine" data-kind="text" value="${esc(s.brochure.attachLine)}"><span class="hint">The sentence goes just above your sign-off, or wherever a template has {{brochure}}.</span></div>
   </div></section>
 
-  <section class="card"><div class="ch"><h2>Email templates</h2><div class="tabs">${Object.entries(s.templates).map(([k, v]) => `<button class="tab" data-tpl="${k}" aria-pressed="${k === ui.tpl}">${esc(v.label)}</button>`).join("")}</div></div><div class="cb" style="display:flex;flex-direction:column;gap:10px">
+  <section class="card"><div class="ch"><h2>Email templates</h2><div class="tabs">${Object.entries(s.templates).map(([k, v]) => `<button class="tab" data-tpl="${k}" aria-pressed="${k === ui.tpl}">${esc(v.label)}</button>`).join("")}</div></div><div class="cb tpl-grid"><div style="display:flex;flex-direction:column;gap:10px;min-width:0">
     <div class="field"><label for="tpl-subject">Subject${ui.tpl.startsWith("followup") ? " (follow-ups reply in the original thread, so this is only used if that thread can't be found)" : ""}</label><input type="text" id="tpl-subject" data-tplf="subject" value="${esc(t.subject)}"></div>
-    <div class="field"><label for="tpl-body">Body</label><textarea id="tpl-body" data-tplf="body" style="min-height:240px">${esc(t.body)}</textarea><span class="hint">Fields: {{first_name}} {{employer}} {{role}} {{specialty}} {{city}} {{state}} {{more_openings}} {{signal_line}} {{sender_name}} {{brochure}} (the whole sentence) {{brochure_url}} (just the link). Each comes from the verified listing or employer record; a missing field pauses the sequence instead of guessing. The opt-out line and address are added automatically.</span></div>
+    <div class="field"><label for="tpl-body">Body</label><textarea id="tpl-body" data-tplf="body" class="prose" style="min-height:460px">${esc(t.body)}</textarea><span class="hint">Fields: {{first_name}} {{employer}} {{role}} {{specialty}} {{city}} {{state}} {{more_openings}} {{signal_line}} {{sender_name}} {{brochure}} (the whole sentence) {{brochure_url}} (just the link). Lines starting with "- " become bullet points; text before a dash in a bullet is bolded. Your signature, the P.S. and the address are added automatically, so you don't need to type a sign-off.</span></div>
     <div class="actions"><button class="btn sm" data-act="resetTpl">Restore default</button></div>
+  </div>
+  <div class="field" style="min-width:0"><label>Preview <span class="sub" style="font-weight:400">· how the client sees it, with sample details</span></label><div class="email rich" id="tpl-preview"><span class="sub">Loading preview…</span></div></div>
   </div></section>`;
 }
 
@@ -553,9 +559,18 @@ async function renderAll() {
     const focusId = document.activeElement?.id; const pos = document.activeElement?.selectionStart;
     m.innerHTML = html;
     if (focusId === "qsearch") { const el = document.getElementById("qsearch"); el.focus(); try { el.setSelectionRange(pos, pos); } catch {} }
-    if (v === "settings") await fillBookmarklet();
+    if (v === "settings") { await fillBookmarklet(); previewTemplate(); }
     await renderDrawer();
   } catch (e) { toast(e.message, true); }
+}
+let previewTimer;
+async function previewTemplate() {
+  const box = document.getElementById("tpl-preview"); if (!box) return;
+  const subject = document.getElementById("tpl-subject")?.value; const body = document.getElementById("tpl-body")?.value;
+  try {
+    const r = await api("/api/templates/preview", { method: "POST", body: { key: ui.tpl, subject, body } });
+    box.innerHTML = `<div class="subj">${esc(r.subject)}</div>${r.html}${r.attachment ? `<div class="sub" style="margin-top:8px">📎 ${esc(r.attachment)}</div>` : ""}${r.missing.length ? `<div style="margin-top:10px"><span class="pill p-warn">Would pause: missing ${esc(r.missing.join(", "))}</span></div>` : ""}`;
+  } catch (e) { box.innerHTML = `<span class="pill p-bad">Preview failed</span> ${esc(e.message)}`; }
 }
 async function act(promise, okMsg) {
   try { const r = await promise; toast(r?.message || okMsg || "Done"); await renderAll(); return r; }
@@ -690,6 +705,7 @@ document.addEventListener("change", async (ev) => {
 });
 document.addEventListener("input", (ev) => {
   if (ev.target.id === "qsearch") { clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
+  if (ev.target.id === "tpl-body" || ev.target.id === "tpl-subject") { clearTimeout(previewTimer); previewTimer = setTimeout(previewTemplate, 400); }
 });
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && ui.drawer) { ui.drawer = null; renderDrawer(); } });
 window.addEventListener("hashchange", () => { renderAll(); window.scrollTo(0, 0); });
