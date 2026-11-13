@@ -227,3 +227,4 @@ CREATE TABLE IF NOT EXISTS files (
 );
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment text;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS name_from_email boolean NOT NULL DEFAULT false;

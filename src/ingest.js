@@ -7,6 +7,7 @@ import { toRow } from './integrations/practicematch.js';
 import { importListings } from './engine/discovery.js';
 import { requalifyAll } from './engine/qualify.js';
 import { enroll } from './engine/outreach.js';
+import { fillNamesFromEmail } from './contacts.js';
 
 export const ALLOWED_ORIGINS = ['https://www.practicematch.com', 'https://practicematch.com'];
 
@@ -52,6 +53,7 @@ export async function handleIngest(path, body, token) {
     return { added: r.listings || 0 };
   }
   if (path === 'finish') {
+    await fillNamesFromEmail().catch(() => 0);
     const acc = (await kvGet('pm_browser_run')) || {};
     await requalifyAll();
     let enrolled = 0;

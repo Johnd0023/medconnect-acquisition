@@ -10,6 +10,7 @@ import * as outlook from './integrations/outlook.js';
 import { handleIngest, ALLOWED_ORIGINS } from './ingest.js';
 import { collectorScript } from './collector.js';
 import { brochureBySlug } from './brochure.js';
+import { fillNamesFromEmail } from './contacts.js';
 
 assertCoreConfig();
 
@@ -180,6 +181,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 await migrate();
+await fillNamesFromEmail().then((n) => n && console.log(`Filled in ${n} contact names from email addresses`)).catch((e) => console.error('Name fill failed:', e.message));
 server.listen(cfg.port, () => {
   console.log(`MedConnect platform listening on ${cfg.appUrl} (port ${cfg.port})`);
   startScheduler();

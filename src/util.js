@@ -82,3 +82,21 @@ export function addSendDays(from, n, days = [1, 2, 3, 4, 5]) {
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const randInt = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+
+// Mailboxes that belong to a team, not a person: never turned into a name.
+const GENERIC_MAILBOX = /^(info|careers?|jobs?|recruit\w*|talent\w*|hr|humanresources|admin\w*|office|contact|hello|support|staffing|physicians?|providers?|apply|applications?|noreply|no-reply|donotreply|medicalstaff|credentialing|frontdesk|reception|billing|marketing|sales|team|hiring|employment|workforce|careers?team|physicianrecruitment|providerrecruitment)$/i;
+const GENERIC_WORD = /(recruit|career|talent|staffing|hiring|employment|credential|info|admin|office|noreply|support|physicians|providers|jobs)/i;
+const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+
+/** "liz.ray@christushealth.org" → { first: 'Liz', last: 'Ray' }; null when the address doesn't spell out a person's name. */
+export function nameFromEmail(email) {
+  if (!email || isRelay(email)) return null;
+  const local = String(email).split('@')[0].split('+')[0].toLowerCase();
+  if (GENERIC_MAILBOX.test(local) || GENERIC_WORD.test(local)) return null;
+  const parts = local.split(/[._-]+/).map((p) => p.replace(/\d+/g, '')).filter(Boolean);
+  if (parts.length < 2 || parts.some((p) => !/^[a-z']+$/.test(p))) return null;
+  const words = parts[0] === 'dr' ? parts.slice(1) : parts;
+  const first = words[0]; const last = words[words.length - 1];
+  if (words.length < 2 || first.length < 2 || last.length < 2) return null;
+  return { first: cap(first), last: cap(last) };
+}

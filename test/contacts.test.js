@@ -6,7 +6,7 @@ import { writeFileSync } from 'node:fs';
 process.env.SCHEDULER = 'off';
 
 const { q, one, migrate } = await import('../src/db.js');
-const { listContacts, createContact, updateContact, exportContacts } = await import('../src/contacts.js');
+const { listContacts, createContact, updateContact, exportContacts, fillNamesFromEmail } = await import('../src/contacts.js');
 
 test('client contact database', async () => {
   await migrate();
@@ -52,9 +52,23 @@ test('client contact database', async () => {
   assert.deepEqual(jane.foundVia, ['Added by you']);
   await assert.rejects(() => createContact({ name: 'No Company' }), /company/);
 
+  // Names worked out from email addresses
+  const e3 = await one(`INSERT INTO employers (name, norm_name, sources) VALUES ('Baptist Memorial','baptist memorial','{PM}') RETURNING id`);
+  await q(`INSERT INTO contacts (employer_id, first_name, full_name, email, sources) VALUES ($1,'Ann','Ann','ann.lee@baptist.org','{PM}'), ($1,NULL,NULL,'mark.jones@baptist.org','{PM}'), ($1,NULL,NULL,'recruitment@baptist.org','{PM}'), ($1,'Bo','Bo','robert.king@baptist.org','{PM}')`, [e3.id]);
+  assert.equal(await fillNamesFromEmail(), 2);
+  const names = Object.fromEntries((await q(`SELECT email, full_name, first_name, last_name FROM contacts WHERE employer_id = $1`, [e3.id])).map((r) => [r.email, r]));
+  assert.equal(names['ann.lee@baptist.org'].full_name, 'Ann Lee');
+  assert.equal(names['mark.jones@baptist.org'].last_name, 'Jones');
+  assert.equal(names['recruitment@baptist.org'].full_name, null, 'team mailboxes stay nameless');
+  assert.equal(names['robert.king@baptist.org'].full_name, 'Bo', 'a name that disagrees with the address is left alone');
+  const { addContact } = await import('../src/engine/ingest.js');
+  const added = await addContact(e3.id, { email: 'sara.diaz@baptist.org' }, 'PM');
+  assert.equal(added.contact.full_name, 'Sara Diaz');
+
   // Excel export
   const x = await exportContacts({});
-  assert.equal(x.count, 4);
+  assert.equal(x.count, 9);
+  const { writeFileSync: w } = await import('node:fs');
   assert.match(x.__file.name, /^MedConnect-Contacts-\d{4}-\d{2}-\d{2}\.xlsx$/);
   assert.equal(x.__file.data.subarray(0, 2).toString(), 'PK');
   writeFileSync('/tmp/contacts-test.xlsx', x.__file.data);

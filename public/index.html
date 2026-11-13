@@ -554,7 +554,7 @@ async function renderContacts() {
 
   <section class="card">${d.rows.length ? `<table class="ctable"><colgroup><col style="width:27%"><col style="width:21%"><col style="width:21%"><col style="width:12%"><col style="width:19%"></colgroup>
     <thead><tr><th>Contact</th><th>Client</th><th>Found via</th><th>Outreach</th><th>Notes</th></tr></thead><tbody>${d.rows.map((r) => `<tr>
-      <td><b>${esc(r.name || "—")}</b>${r.title ? `<span class="sub"> · ${esc(r.title)}</span>` : ""}
+      <td><b>${esc(r.name || "—")}</b>${r.name_from_email ? ' <span class="sub" title="Worked out from the email address">(from email)</span>' : ""}${r.title ? `<span class="sub"> · ${esc(r.title)}</span>` : ""}
         <div>${r.email ? `<a class="mono sm" href="mailto:${esc(r.email)}">${esc(r.email)}</a>${r.relay ? ' <span class="sub">(PM forwarding)</span>' : ""}` : '<span class="sub">no email</span>'}</div>${r.phone ? `<div class="mono sm sub">${esc(r.phone)}</div>` : ""}</td>
       <td><a href="#contacts" data-open="${r.employer_id}" title="${esc(r.type || "")}">${esc(r.employer)}</a><div class="sub">${esc([r.city, r.state].filter(Boolean).join(", "))}</div></td>
       <td>${srcChips(r.sources)} <span class="sub">${fmtShort(r.created_at)}</span>${r.jobs[0] ? `<div class="sm">${r.jobs[0].url ? `<a href="${esc(r.jobs[0].url)}" target="_blank" rel="noopener">${esc(r.jobs[0].title || "Job post")}</a>` : esc(r.jobs[0].title || "Job post")}${r.jobs.length > 1 ? ` <span class="sub">+${r.jobs.length - 1}</span>` : ""}</div>` : ""}</td>

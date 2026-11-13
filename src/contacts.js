@@ -1,7 +1,7 @@
 // Client contact database: every contact the system has found or you added, with where they came from,
 // which client they're with, the job posts behind them and the outreach history. Exportable to Excel.
 import { q, one, logEvent } from './db.js';
-import { isRelay, isFreeMail, emailDomain } from './util.js';
+import { isRelay, isFreeMail, emailDomain, nameFromEmail } from './util.js';
 import { upsertEmployer, addContact } from './engine/ingest.js';
 import { writeXlsx } from './xlsx.js';
 
@@ -20,9 +20,28 @@ function outreachStatus(r) {
   return 'Not contacted';
 }
 
+/**
+ * Fill in missing names from the email address (liz.ray@… → Liz Ray). Also completes a first-name-only contact
+ * when the address confirms it (ann.lee@… with first name "Ann" → Ann Lee). Runs at start-up and after every scan.
+ */
+export async function fillNamesFromEmail() {
+  const rows = await q(`SELECT id, first_name, last_name, full_name, email FROM contacts
+                         WHERE email IS NOT NULL AND email NOT ILIKE '%@practicematch.com'
+                           AND (coalesce(last_name, '') = '' OR coalesce(full_name, '') = '' OR lower(full_name) = lower(email))`);
+  let n = 0;
+  for (const c of rows) {
+    const g = nameFromEmail(c.email); if (!g) continue;
+    const first = (c.first_name || '').trim();
+    if (first && first.toLowerCase() !== g.first.toLowerCase()) continue; // the address doesn't match the name we have
+    await q(`UPDATE contacts SET first_name = $2, last_name = $3, full_name = $4, name_from_email = true WHERE id = $1`, [c.id, first || g.first, g.last, `${first || g.first} ${g.last}`]);
+    n++;
+  }
+  return n;
+}
+
 export async function listContacts({ search = '', source = '', state = '', status = '', direct = '', limit = 5000 } = {}) {
   const rows = await q(`
-    SELECT c.id, c.full_name, c.first_name, c.last_name, c.title, c.email, c.phone, c.email_confidence, c.sources, c.bad, c.notes, c.created_at,
+    SELECT c.id, c.full_name, c.first_name, c.last_name, c.name_from_email, c.title, c.email, c.phone, c.email_confidence, c.sources, c.bad, c.notes, c.created_at,
            e.id AS employer_id, e.name AS employer, e.type, e.city, e.state, e.domain, e.status AS emp_status,
            (SELECT jsonb_agg(j) FROM (SELECT coalesce(o.title, concat_ws(' ', o.specialty, o.role)) AS title, o.pm_code AS code, o.url, o.city, o.state, o.posted_at AS posted, o.active
                                       FROM openings o WHERE o.employer_id = e.id AND c.email IS NOT NULL AND lower(o.contact_email) = lower(c.email)
@@ -93,14 +112,14 @@ export async function exportContacts(filters) {
   const contacts = {
     name: 'Contacts',
     columns: [
-      { header: 'Name', width: 24 }, { header: 'Title', width: 28 }, { header: 'Email', width: 32 }, { header: 'Phone', width: 16 },
+      { header: 'First name', width: 14 }, { header: 'Last name', width: 16 }, { header: 'Title', width: 28 }, { header: 'Email', width: 32 }, { header: 'Phone', width: 16 },
       { header: 'Client / Company', width: 34 }, { header: 'Client type', width: 16 }, { header: 'City', width: 16 }, { header: 'State', width: 7 },
       { header: 'Website', width: 24 }, { header: 'Found via', width: 18 }, { header: 'Job posts', width: 48 }, { header: 'PracticeMatch codes', width: 20 },
       { header: 'Job post link', width: 30 }, { header: 'Outreach status', width: 16 }, { header: 'Emails sent', width: 11 }, { header: 'Last emailed', width: 13 },
       { header: 'Last reply', width: 18 }, { header: 'Last reply date', width: 14 }, { header: 'Email type', width: 22 }, { header: 'Added', width: 12 }, { header: 'Notes', width: 40 },
     ],
     rows: list.map((r) => [
-      r.name, r.title || '', r.email || '', r.phone || '', r.employer, r.type || '', r.city || '', r.state || '',
+      r.first_name || (r.relay ? '' : (r.name || '').split(' ')[0]), r.last_name || (r.relay ? '' : (r.name || '').split(' ').slice(1).join(' ')), r.title || '', r.email || '', r.phone || '', r.employer, r.type || '', r.city || '', r.state || '',
       r.domain ? { text: r.domain, link: `https://${r.domain}` } : '', r.foundVia.join(', '),
       r.jobs.map((j) => [j.title, [j.city, j.state].filter(Boolean).join(', ')].filter(Boolean).join(' – ')).join('; '),
       r.jobs.map((j) => j.code).filter(Boolean).join(', '),

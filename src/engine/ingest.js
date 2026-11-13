@@ -1,7 +1,7 @@
 // Turn raw source records (PracticeMatch listings, Lusha contacts) into one employer record each,
 // with consolidated openings and deduplicated contacts.
 import { q, one, logEvent } from '../db.js';
-import { normDomain, normName, emailDomain, isFreeMail, isRelay } from '../util.js';
+import { normDomain, normName, emailDomain, isFreeMail, isRelay, nameFromEmail } from '../util.js';
 import { EMPLOYER_TYPES as T, knownProviders } from '../settings.js';
 
 const SRC_LABEL = { PM: 'PracticeMatch', Lusha: 'Lusha', Referral: 'a referral', Manual: 'manual entry' };
@@ -90,13 +90,17 @@ export async function addContact(employerId, c, source) {
     const existing = await one('SELECT * FROM contacts WHERE employer_id = $1 AND lower(full_name) = lower($2)', [employerId, c.fullName]);
     if (existing) return { contact: existing, isNew: false };
   }
+  // No name given but the address spells one out (liz.ray@…): use it
+  const guess = !isRelay(email) && (!c.lastName || !(c.fullName || c.firstName)) ? nameFromEmail(email) : null;
+  const fromEmail = !!guess && (!c.firstName || c.firstName.toLowerCase() === guess.first.toLowerCase()) && !(c.fullName || '').includes(' ');
+  if (fromEmail) { c = { ...c, firstName: c.firstName || guess.first, lastName: guess.last, fullName: `${c.firstName || guess.first} ${guess.last}` }; }
   const full = c.fullName || [c.firstName, c.lastName].filter(Boolean).join(' ');
-  const contact = await one(`INSERT INTO contacts (employer_id, first_name, last_name, full_name, title, email, email_confidence, phone, sources, lusha_id)
-                             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,ARRAY[$9]::text[],$10) RETURNING *`,
+  const contact = await one(`INSERT INTO contacts (employer_id, first_name, last_name, full_name, title, email, email_confidence, phone, sources, lusha_id, name_from_email)
+                             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,ARRAY[$9]::text[],$10,$11) RETURNING *`,
   // A forwarding address has no person's name: never guess one from the placeholder label.
   [employerId, isRelay(email) ? (c.firstName || null) : (c.firstName || full.split(' ')[0] || null),
     isRelay(email) ? (c.lastName || null) : (c.lastName || full.split(' ').slice(1).join(' ') || null), full || null,
-    c.title || null, email, c.emailConfidence || null, c.phone || null, source, c.lushaId || null]);
+    c.title || null, email, c.emailConfidence || null, c.phone || null, source, c.lushaId || null, fromEmail]);
   return { contact, isNew: true };
 }
 
