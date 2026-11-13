@@ -4,6 +4,7 @@ import { cfg, integrations } from './config.js';
 import { getSettings, saveSettings, DEFAULT_TEMPLATES, EMPLOYER_TYPES } from './settings.js';
 import { loadContext, requalify, requalifyAll, rankContacts, isUsable, protectionMatch, prospectDecision, selectedContacts } from './engine/qualify.js';
 import { compose } from './engine/compose.js';
+import { brochureFor, brochureMeta, publicUrl, saveBrochure, deleteBrochure } from './brochure.js';
 import { enroll, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
 import { runDiscovery, importListings, lushaFillContacts, resolveIndustries, runPracticeMatchScan } from './engine/discovery.js';
 import { pollReplies, referralFrom } from './engine/replies.js';
@@ -89,18 +90,19 @@ export const routes = {
     const name = (c) => c.full_name || c.email;
     // Previews: the next email of each running sequence, or what enrolling would send to the selected contacts
     const previews = [];
+    const bro = {}; for (const st of [0, 1, 2]) bro[st] = await brochureFor(st, s, { lineOnly: true });
     const running = seqs.filter((x) => x.status === 'active' || x.status === 'paused');
     const group = (list) => { const n = list.map((c) => c.first_name).filter(Boolean); return n.length === list.length ? (n.length === 2 ? n.join(' and ') : `${n.slice(0, -1).join(', ')} and ${n.at(-1)}`) : 'there'; };
     if (running.length) {
       for (const sq of running) {
         const list = [sq.contact_id, ...(sq.cc_contact_ids || [])].map((id) => contacts.find((c) => c.id === id)).filter(Boolean);
         const who = list.length > 1 ? { ...list[0], email: null, first_name: group(list) } : list[0];
-        previews.push({ to: list.map((c) => c.email).join(', '), names: list.map(name).join(', '), status: sq.status, nextAt: sq.next_at, stopReason: sq.stop_reason, ...compose(e, who, openings, sq.step, s) });
+        previews.push({ to: list.map((c) => c.email).join(', '), names: list.map(name).join(', '), status: sq.status, nextAt: sq.next_at, stopReason: sq.stop_reason, ...compose(e, who, openings, sq.step, s, bro[sq.step]) });
       }
     } else if (selected.length) {
       const fresh = selected.filter((c) => !inSeq.has(c.id));
-      if (mode === 'together' && fresh.length > 1) previews.push({ to: fresh.map((c) => c.email).join(', '), names: fresh.map(name).join(', '), ...compose(e, { ...fresh[0], email: null, first_name: group(fresh) }, openings, 0, s) });
-      else for (const c of (mode === 'single' ? fresh.slice(0, 1) : fresh)) previews.push({ to: c.email, names: name(c), ...compose(e, c, openings, 0, s) });
+      if (mode === 'together' && fresh.length > 1) previews.push({ to: fresh.map((c) => c.email).join(', '), names: fresh.map(name).join(', '), ...compose(e, { ...fresh[0], email: null, first_name: group(fresh) }, openings, 0, s, bro[0]) });
+      else for (const c of (mode === 'single' ? fresh.slice(0, 1) : fresh)) previews.push({ to: c.email, names: name(c), ...compose(e, c, openings, 0, s, bro[0]) });
     }
     const preview = previews[0] || null;
     return {
@@ -290,6 +292,7 @@ export const routes = {
       protectedAccounts, suppressions,
       integrations: { ...integrations(), outlook: await outlook.connection(), redirectUri: outlook.redirectUri(), dryRun: cfg.dryRun, scheduler: cfg.schedulerEnabled, timezone: cfg.timezone, sendBlocked: await kvGet('send_blocked') },
       credits: await lusha.creditsUsed(),
+      brochure: await brochureMeta().then((m) => (m ? { ...m, url: publicUrl(m) } : null)),
     };
   },
 
@@ -299,6 +302,16 @@ export const routes = {
     return { ok: true, settings: s };
   },
 
+  'POST /api/brochure': async ({ body }) => {
+    const m = await saveBrochure(body);
+    return { ok: true, message: `${m.name} uploaded (${(m.size / 1048576).toFixed(1)} MB)` };
+  },
+  'DELETE /api/brochure': async () => {
+    await deleteBrochure();
+    const s = await getSettings();
+    if (s.brochure?.mode === 'attach' || (s.brochure?.mode === 'link' && !s.brochure.url)) await saveSettings({ brochure: { mode: 'off' } });
+    return { ok: true, message: 'Brochure removed; emails no longer include it' };
+  },
   'POST /api/protected': async ({ body }) => {
     const lines = String(body.text || '').split('\n').map((l) => l.trim()).filter(Boolean);
     let n = 0;

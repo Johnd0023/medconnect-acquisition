@@ -100,25 +100,28 @@ const SELECT = 'id,conversationId,internetMessageId,subject';
 const recipientsOf = (to, toName) => (Array.isArray(to) ? to : [{ address: to, name: toName }])
   .map((r) => ({ emailAddress: { address: r.address, name: r.name || undefined } }));
 
-export async function sendNew({ to, toName, subject, body }) {
+const fileAttachments = (list) => (list || []).map((a) => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: a.name, contentType: a.contentType, contentBytes: a.contentBytes }));
+
+export async function sendNew({ to, toName, subject, body, attachments }) {
   const draft = await graph('POST', '/me/messages', {
     subject,
     body: { contentType: 'Text', content: body },
     toRecipients: recipientsOf(to, toName),
+    ...(attachments?.length ? { attachments: fileAttachments(attachments) } : {}),
   });
   await graph('POST', `/me/messages/${encodeURIComponent(draft.id)}/send`);
   return { graphId: draft.id, conversationId: draft.conversationId, internetMessageId: draft.internetMessageId };
 }
 
 /** Send a follow-up as a reply in the same thread as the earlier message (found by its Internet Message-ID). */
-export async function sendFollowUp({ to, toName, previousInternetMessageId, body, fallbackSubject }) {
+export async function sendFollowUp({ to, toName, previousInternetMessageId, body, fallbackSubject, attachments }) {
   let original = null;
   if (previousInternetMessageId) {
     const filter = encodeURIComponent(`internetMessageId eq '${previousInternetMessageId.replace(/'/g, "''")}'`);
     const found = await graph('GET', `/me/mailFolders/sentitems/messages?$filter=${filter}&$select=${SELECT},body,sentDateTime&$top=1`);
     original = found.value?.[0] || null;
   }
-  if (!original) return sendNew({ to, toName, subject: fallbackSubject, body });
+  if (!original) return sendNew({ to, toName, subject: fallbackSubject, body, attachments });
   const reply = await graph('POST', `/me/messages/${encodeURIComponent(original.id)}/createReply`, {});
   const sent = new Date(original.sentDateTime).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
   const quoted = (original.body?.content || '').split('\n').map((l) => `> ${l}`).join('\n');
@@ -126,6 +129,7 @@ export async function sendFollowUp({ to, toName, previousInternetMessageId, body
     toRecipients: recipientsOf(to, toName),
     body: { contentType: 'Text', content: `${body}\n\nOn ${sent}, I wrote:\n${quoted}` },
   });
+  for (const a of fileAttachments(attachments)) await graph('POST', `/me/messages/${encodeURIComponent(reply.id)}/attachments`, a);
   await graph('POST', `/me/messages/${encodeURIComponent(reply.id)}/send`);
   return { graphId: reply.id, conversationId: reply.conversationId || original.conversationId, internetMessageId: reply.internetMessageId };
 }

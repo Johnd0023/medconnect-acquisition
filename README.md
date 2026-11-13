@@ -124,6 +124,14 @@ Every email, from any source (PracticeMatch, Lusha, import, manual), is checked 
 
 A blocked email stops the sequence and writes "Email … BLOCKED: matches protected client" to the employer's history. Clients added to the list later are honored at the next send.
 
+## Brochure
+
+Settings → Brochure: upload a PDF (up to 3 MB), then choose **Off**, **As a link** or **As an attachment**, and which emails carry it (first email, follow-up 1, follow-up 2). One sentence is added just above the sign-off, or wherever a template has `{{brochure}}`.
+
+- Link: the uploaded file is served at a private, unguessable URL (`/b/<code>/<file name>`) that needs no login, so clients can open it. Or paste your own link (website, Google Drive). Uploading a new file changes the private URL.
+- Attachment: the file goes with the email through Outlook. Hospital spam filters often hold attachments from unknown senders, so links are safer for first emails.
+- The employer drawer preview shows the sentence and a 📎 line when a file will be attached.
+
 ## Reply handling
 
 | Category | What the platform does |

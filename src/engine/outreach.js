@@ -5,6 +5,7 @@ import { cfg } from '../config.js';
 import { getSettings } from '../settings.js';
 import { loadContext, requalify, protectedRecipientMatch } from './qualify.js';
 import { compose } from './compose.js';
+import { brochureFor } from '../brochure.js';
 import * as outlook from '../integrations/outlook.js';
 import { zoned, hhmmToMin, startOfBusinessDay, addSendDays, atLocalTime, randInt, isRelay } from '../util.js';
 
@@ -157,7 +158,9 @@ export async function sendTick({ force = false } = {}) {
   const addressee = recipients.length > 1
     ? { ...contact, email: null, first_name: names.length === recipients.length ? (names.length === 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`) : 'there' }
     : contact;
-  const m = compose(emp, addressee, r.openings, seq.step, s);
+  const bro = await brochureFor(seq.step, s, { lineOnly: cfg.dryRun });
+  const m = compose(emp, addressee, r.openings, seq.step, s, bro);
+  const attachments = bro?.attachment?.contentBytes ? [bro.attachment] : undefined;
   if (m.missing.length) { await stopSequenceById(seq.id, `Missing verified fact: ${m.missing.join(', ')}`, 'paused'); return { sent: false, reason: 'paused (missing fact)' }; }
   const toList = recipients.map((c) => ({ address: c.email, name: c.full_name || undefined }));
 
@@ -168,8 +171,8 @@ export async function sendTick({ force = false } = {}) {
     try {
       const prev = seq.step > 0 ? await one(`SELECT internet_message_id FROM messages WHERE sequence_id = $1 AND status = 'sent' ORDER BY sent_at DESC LIMIT 1`, [seq.id]) : null;
       result = seq.step === 0
-        ? await outlook.sendNew({ to: toList, subject: m.subject, body: m.body })
-        : await outlook.sendFollowUp({ to: toList, previousInternetMessageId: prev?.internet_message_id, body: m.body, fallbackSubject: m.subject });
+        ? await outlook.sendNew({ to: toList, subject: m.subject, body: m.body, attachments })
+        : await outlook.sendFollowUp({ to: toList, previousInternetMessageId: prev?.internet_message_id, body: m.body, fallbackSubject: m.subject, attachments });
     } catch (e) {
       error = e.message;
       if (e.status === 401 || e.status === 403 || e.code === 'NotConnected' || e.code === 'invalid_grant' || e.code === 'ErrorAccessDenied' || e.code === 'ErrorExceededMessageLimit' || e.code === 'ErrorSubmissionQuotaExceeded') {
@@ -181,9 +184,9 @@ export async function sendTick({ force = false } = {}) {
     }
   }
 
-  await q(`INSERT INTO messages (sequence_id, employer_id, contact_id, step, to_email, subject, body, status, error, graph_id, internet_message_id, conversation_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-  [seq.id, emp.id, contact.id, seq.step, recipients.map((c) => c.email).join(', '), m.subject, m.body, status, error, result.graphId || null, result.internetMessageId || null, result.conversationId || null]);
+  await q(`INSERT INTO messages (sequence_id, employer_id, contact_id, step, to_email, subject, body, status, error, graph_id, internet_message_id, conversation_id, attachment)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+  [seq.id, emp.id, contact.id, seq.step, recipients.map((c) => c.email).join(', '), m.subject, m.body, status, error, result.graphId || null, result.internetMessageId || null, result.conversationId || null, m.attachment]);
   await kvSet('next_send_at', new Date(Date.now() + randInt(s.minGapSeconds, s.maxGapSeconds) * 1000).toISOString());
 
   const label = seq.step === 0 ? 'Initial email' : `Follow-up ${seq.step}`;

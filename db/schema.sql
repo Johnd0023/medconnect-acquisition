@@ -215,3 +215,14 @@ UPDATE protected_accounts
        norm_name = regexp_replace(lower(regexp_replace(name, '^.*@', '')), '[^a-z0-9 ]', ' ', 'g')
  WHERE domain IS NULL AND name ~* '^[^ ]*@?[a-z0-9-]+(\.[a-z0-9-]+)+$'
    AND NOT EXISTS (SELECT 1 FROM protected_accounts p2 WHERE p2.norm_name = regexp_replace(lower(regexp_replace(protected_accounts.name, '^.*@', '')), '[^a-z0-9 ]', ' ', 'g') AND p2.id <> protected_accounts.id);
+
+CREATE TABLE IF NOT EXISTS files (
+  kind         text PRIMARY KEY,
+  name         text NOT NULL,
+  content_type text NOT NULL,
+  size         int NOT NULL,
+  slug         text NOT NULL,
+  data         text NOT NULL,
+  uploaded_at  timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment text;

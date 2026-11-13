@@ -9,6 +9,7 @@ import { startScheduler } from './scheduler.js';
 import * as outlook from './integrations/outlook.js';
 import { handleIngest, ALLOWED_ORIGINS } from './ingest.js';
 import { collectorScript } from './collector.js';
+import { brochureBySlug } from './brochure.js';
 
 assertCoreConfig();
 
@@ -81,6 +82,15 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/healthz') {
       await pool.query('SELECT 1');
       return send(res, 200, { ok: true });
+    }
+    // The brochure link in emails: public (clients aren't signed in), unguessable URL, nothing else exposed
+    const bm = url.pathname.match(/^\/b\/([A-Za-z0-9_-]{8,40})\/[^/]*$/);
+    if (bm && req.method === 'GET') {
+      const f = await brochureBySlug(bm[1]);
+      if (!f) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('This brochure is no longer available.'); }
+      const buf = Buffer.from(f.data, 'base64');
+      res.writeHead(200, { 'Content-Type': f.content_type, 'Content-Length': buf.length, 'Content-Disposition': `inline; filename="${f.name.replace(/"/g, '')}"`, 'Cache-Control': 'public, max-age=3600', 'X-Content-Type-Options': 'nosniff', 'X-Robots-Tag': 'noindex, nofollow' });
+      return res.end(buf);
     }
     if (url.pathname === '/favicon.ico' || url.pathname === '/logo.png') {
       const img = await readFile(new URL('../public/logo.png', import.meta.url));

@@ -1,7 +1,7 @@
 // Email composition from verified facts only. A template field with no verified value
 // leaves the email unsendable (the sequence pauses) instead of guessing.
 const FIELD_RE = /\{\{(\w+)\}\}/g;
-const OPTIONAL = new Set(['more_openings']);
+const OPTIONAL = new Set(['more_openings', 'brochure']);
 
 export function fieldsFor(emp, contact, openings, settings) {
   const active = openings.filter((o) => o.active).sort((a, b) => new Date(b.posted_at || b.first_seen) - new Date(a.posted_at || a.first_seen));
@@ -52,16 +52,23 @@ export function withSignature(body, settings) {
 }
 
 /** Compose the email for `step` (0 = initial, 1-2 = follow-ups). */
-export function compose(emp, contact, openings, step, settings) {
+export function compose(emp, contact, openings, step, settings, brochure = null) {
   const t = settings.templates;
   const hasOpening = openings.some((o) => o.active);
   const key = step === 0 ? (hasOpening ? 'initial_opening' : 'initial_general') : step === 1 ? 'followup_1' : 'followup_2';
-  const r = render(t[key], fieldsFor(emp, contact, openings, settings));
+  const r = render(t[key], { ...fieldsFor(emp, contact, openings, settings), brochure: brochure?.line || '' });
+  // Brochure line: where the template puts {{brochure}}, otherwise as its own paragraph just above the sign-off
+  if (brochure?.line && !/\{\{\s*brochure\s*\}\}/.test(t[key].body)) {
+    const paras = r.body.replace(/\s+$/, '').split(/\n{2,}/);
+    paras.splice(Math.max(1, paras.length - 1), 0, brochure.line);
+    r.body = paras.join('\n\n');
+  }
+  r.body = r.body.replace(/\n{3,}/g, '\n\n');
   // PracticeMatch routes and labels messages by the posting's code: keep "Opportunity <code>" in the subject.
   const posting = openings.filter((o) => o.pm_code && contact?.email && (o.contact_email || '').toLowerCase() === contact.email.toLowerCase())
     .sort((a, b) => new Date(b.posted_at || b.first_seen) - new Date(a.posted_at || a.first_seen))[0];
   if (posting && /@practicematch\.com$/i.test(contact.email) && !/opportunity\s+\S+/i.test(r.subject)) r.subject = `Opportunity ${posting.pm_code} | ${r.subject}`;
   if (!settings.companyAddress) r.missing.push('company_address (Settings → Sender)');
   if (!/[a-z]/i.test(r.subject)) r.missing.push('subject');
-  return { ...r, body: withSignature(r.body, settings), template: t[key].label, key };
+  return { ...r, body: withSignature(r.body, settings), template: t[key].label, key, attachment: brochure?.attachment?.name || null };
 }

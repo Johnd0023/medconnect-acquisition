@@ -154,6 +154,14 @@ export const DEFAULT_SETTINGS = {
   senderName: 'MedConnect Business Development',
   companyAddress: '',          // CAN-SPAM: a valid postal address (street, P.O. box or registered mailbox) must appear in every email; shown in the signature
   optOutLine: "P.S. If this isn't relevant, just let me know and I won't follow up.",
+  // --- brochure: off | link | attach, on the chosen emails (0 = first email, 1-2 = follow-ups) ---
+  brochure: {
+    mode: 'off',
+    url: '',                 // your own link (website, Google Drive…); blank = the file uploaded in Settings
+    steps: [0],
+    linkLine: "Here's a quick overview of MedConnect: {{brochure_url}}",
+    attachLine: "I've attached a short overview of MedConnect for reference.",
+  },
   templates: DEFAULT_TEMPLATES,
 };
 
@@ -200,6 +208,10 @@ function validate(s) {
   int(s.followupGap2Days, 1, 30, 'Follow-up 2 gap');
   int(s.lusha.dailyRevealLimit, 0, 1000, 'Lusha daily reveal limit');
   int(s.lusha.pagesPerDay, 0, 20, 'Lusha pages per day');
+  if (!['off', 'link', 'attach'].includes(s.brochure?.mode)) throw new Error('Brochure must be off, a link or an attachment.');
+  if (s.brochure.url && !/^https?:\/\/\S+$/i.test(s.brochure.url.trim())) throw new Error('The brochure link must start with https://');
+  if (!Array.isArray(s.brochure.steps) || s.brochure.steps.some((n) => ![0, 1, 2].includes(n))) throw new Error('Pick which emails get the brochure.');
+  if (s.brochure.mode === 'link' && !/\{\{\s*brochure_url\s*\}\}/.test(s.brochure.linkLine || '')) throw new Error('The link sentence needs {{brochure_url}} where the link goes.');
   for (const t of ['sendWindowStart', 'sendWindowEnd', 'discoveryTime']) if (!/^\d{1,2}:\d{2}$/.test(s[t])) throw new Error(`${t} must look like 08:30.`);
 }
 
