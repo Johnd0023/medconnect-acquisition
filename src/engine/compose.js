@@ -76,7 +76,7 @@ export function compose(emp, contact, openings, step, settings, brochure = null)
   if (sig?.enabled) {
     const main = stripSignOff(r.body, settings);
     const body = `${main}\n\n${signatureText(settings)}\n\n${optOutLine(settings)}`;
-    const html = htmlFor(main, settings, brochure) + signatureHtml(settings) + `<p style="margin:18px 0 0 0;font-family:Aptos,Calibri,Arial,sans-serif;color:#6b7280;font-size:9.5pt">${escapeHtml(optOutLine(settings))}</p>`;
+    const html = htmlFor(main, settings, brochure) + signatureHtml(settings) + `<p style="margin:18px 0 0 0;font-family:Aptos,Calibri,Arial,sans-serif;color:#6b7280;font-size:10.5pt">${escapeHtml(optOutLine(settings))}</p>`;
     return { ...r, body, html, template: t[key].label, key, attachment: brochure?.attachment?.name || null };
   }
   const body = withSignature(r.body, settings);
@@ -112,7 +112,7 @@ export function signatureText(settings) {
 
 export function signatureHtml(settings) {
   const s = settings.signature || {}; const e = escapeHtml;
-  const base = 'font-family:Aptos,Calibri,Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.35;color:#1f2328;margin:0';
+  const base = 'font-family:Aptos,Calibri,Arial,Helvetica,sans-serif;font-size:12pt;line-height:1.35;color:#1f2328;margin:0';
   const grey = 'color:#5f6b7a';
   const tel = (s.phone || '').replace(/[^\d+]/g, '');
   const phone = s.phone ? (tel.length >= 10 ? `<a href="tel:+1${tel.slice(-10)}" style="${grey};text-decoration:none">${e(s.phone)}</a>` : `<span style="${grey}">${e(s.phone)}</span>`) : '';
@@ -121,8 +121,8 @@ export function signatureHtml(settings) {
     + `<p style="${base};margin-bottom:14px">${s.name ? `<strong>${e(s.name)}</strong>` : ''}${s.title ? `<br><span style="${grey}">${e(s.title)}</span>` : ''}</p>`
     + `<p style="${base};margin-bottom:10px">${s.company ? `<strong>${e(s.company)}</strong>` : ''}${phone ? `<br>${phone}` : ''}</p>`
     + (s.logo ? `<p style="${base};margin-bottom:6px"><a href="https://medconnectstaffing.com" style="text-decoration:none"><img src="${cfg.appUrl}/email-logo.png" width="212" height="53" alt="MedConnect Staffing" style="display:block;border:0;width:212px;height:53px"></a></p>` : '')
-    + (s.tagline ? `<p style="${base};font-size:10pt;margin-bottom:6px">${e(s.tagline)}</p>` : '')
-    + (settings.companyAddress ? `<p style="${base};font-size:9pt;color:#6b7280">${e(settings.companyAddress)}</p>` : '')
+    + (s.tagline ? `<p style="${base};font-size:11pt;margin-bottom:6px">${e(s.tagline)}</p>` : '')
+    + (settings.companyAddress ? `<p style="${base};font-size:10pt;color:#6b7280">${e(settings.companyAddress)}</p>` : '')
     + `</div>`;
 }
 

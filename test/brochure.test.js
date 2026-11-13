@@ -61,7 +61,7 @@ test('brochure as a link or an attachment', async () => {
   assert.match(m.html, /color:#6b7280[^>]*>1440 Coral Ridge/);
   const { toHtml } = await import('../src/engine/html.js');
   const h = toHtml('Intro\n\n- Nationwide Reach – We recruit beyond job boards.\n- Plain bullet <b>\n\nSee [our brochure](https://x.test/b) or https://x.test/a.');
-  assert.match(h, /<ul[^>]*><li[^>]*><strong>Nationwide Reach<\/strong> – We recruit/);
+  assert.match(h, /•&nbsp;&nbsp;<strong>Nationwide Reach<\/strong> – We recruit/);
   assert.ok(h.includes('Plain bullet &lt;b&gt;'), 'text is escaped');
   assert.ok(h.includes('<a href="https://x.test/b"') && h.includes('>our brochure</a>') && h.includes('>https://x.test/a</a>.'));
 

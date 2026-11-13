@@ -129,7 +129,7 @@ export async function sendFollowUp({ to, toName, previousInternetMessageId, body
     ? innerBody(original.body.content)
     : escapeHtml(original.body?.content || '').replace(/\n/g, '<br>');
   const content = html
-    ? `${html}<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:11pt;color:#1f2328;margin-top:18px">On ${escapeHtml(sent)}, I wrote:</div><blockquote style="margin:6px 0 0 0;padding-left:12px;border-left:2px solid #d0d7de;color:#57606a">${origHtml}</blockquote>`
+    ? `${html}<div style="font-family:Aptos,Calibri,Arial,sans-serif;font-size:12pt;color:#1f2328;margin-top:18px">On ${escapeHtml(sent)}, I wrote:</div><blockquote style="margin:6px 0 0 0;padding-left:12px;border-left:2px solid #d0d7de;color:#57606a">${origHtml}</blockquote>`
     : null;
   const quoted = (original.body?.content || '').split('\n').map((l) => `> ${l}`).join('\n');
   await graph('PATCH', `/me/messages/${encodeURIComponent(reply.id)}`, {

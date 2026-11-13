@@ -3,9 +3,9 @@
 // Deliberately plain (no images, no layout tables) so it reads like a personal email and lands in the inbox.
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const FONT = "font-family:Aptos,Calibri,Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.45;color:#1f2328";
+const FONT = "font-family:Aptos,Calibri,Arial,Helvetica,sans-serif;font-size:12pt;line-height:1.45;color:#1f2328";
 const P = 'margin:0 0 14px 0';
-const QUIET = 'color:#6b7280;font-size:9.5pt';
+const QUIET = 'color:#6b7280;font-size:10.5pt';
 const BULLET_RE = /^\s*[-•*]\s+/;
 const URL_RE = /\bhttps?:\/\/[^\s<>()]+[^\s<>().,;:!?'"]/g;
 
@@ -21,7 +21,8 @@ function linkify(text, labels) {
 function bulletItem(line, labels) {
   const text = line.replace(BULLET_RE, '');
   const m = text.match(/^(.{2,70}?)\s+[–—-]\s+(.+)$/); // "Lead-in – description" → bold lead-in
-  return m ? `<li style="margin:0 0 6px 0"><strong>${linkify(m[1], labels)}</strong> – ${linkify(m[2], labels)}</li>` : `<li style="margin:0 0 6px 0">${linkify(text, labels)}</li>`;
+  const B = 'margin:0 0 6px 0;padding:0 0 0 14px;text-indent:-14px';
+  return m ? `<p style="${B}">•&nbsp;&nbsp;<strong>${linkify(m[1], labels)}</strong> – ${linkify(m[2], labels)}</p>` : `<p style="${B}">•&nbsp;&nbsp;${linkify(text, labels)}</p>`;
 }
 
 /**
@@ -40,7 +41,7 @@ export function toHtml(text, { linkLabels = {}, quietLines = [] } = {}) {
       const allQuiet = buf.every((l) => quiet.has(l.trim()));
       out.push(`<p style="${P}${allQuiet ? `;${QUIET}` : ''}">${html}</p>`); buf = [];
     };
-    const flushL = () => { if (!list.length) return; out.push(`<ul style="margin:0 0 14px 0;padding-left:22px">${list.map((l) => bulletItem(l, linkLabels)).join('')}</ul>`); list = []; };
+    const flushL = () => { if (!list.length) return; out.push(`<div style="margin:0 0 14px 0">${list.map((l) => bulletItem(l, linkLabels)).join('')}</div>`); list = []; };
     for (const l of lines) {
       if (BULLET_RE.test(l)) { flushP(); list.push(l); } else { flushL(); buf.push(l); }
     }
