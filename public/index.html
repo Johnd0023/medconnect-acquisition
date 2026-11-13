@@ -476,8 +476,8 @@ async function renderSettings() {
 
   <section class="card"><div class="ch"><h2>Sender and compliance</h2></div><div class="cb form">
     <div class="field"><label for="s-sn">Sender name in signature</label><input type="text" id="s-sn" data-path="senderName" data-kind="text" value="${esc(s.senderName)}"></div>
-    <div class="field"><label for="s-addr">Company postal address</label><input type="text" id="s-addr" data-path="companyAddress" data-kind="text" value="${esc(s.companyAddress)}" placeholder="Street, City, State ZIP"><span class="hint">Required in every commercial email (CAN-SPAM). Sequences pause until it's set.</span></div>
-    <div class="field"><label for="s-opt">Opt-out line</label><input type="text" id="s-opt" data-path="optOutLine" data-kind="text" value="${esc(s.optOutLine)}"></div>
+    <div class="field"><label for="s-addr">Company postal address</label><input type="text" id="s-addr" data-path="companyAddress" data-kind="text" value="${esc(s.companyAddress)}" placeholder="Street, City, State ZIP"><span class="hint">Shown on one line in your signature, under MedConnect Staffing. A P.O. box or registered mailbox is fine. Required by law (CAN-SPAM), so sequences pause until it's set.</span></div>
+    <div class="field"><label for="s-opt">Opt-out line</label><input type="text" id="s-opt" placeholder="P.S. If this isn't relevant, just let me know and I won't follow up." data-path="optOutLine" data-kind="text" value="${esc(s.optOutLine)}"></div>
   </div></section>
 
   <section class="card"><div class="ch"><h2>Email templates</h2><div class="tabs">${Object.entries(s.templates).map(([k, v]) => `<button class="tab" data-tpl="${k}" aria-pressed="${k === ui.tpl}">${esc(v.label)}</button>`).join("")}</div></div><div class="cb" style="display:flex;flex-direction:column;gap:10px">

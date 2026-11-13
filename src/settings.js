@@ -152,8 +152,8 @@ export const DEFAULT_SETTINGS = {
 
   // --- sender & compliance ---
   senderName: 'MedConnect Business Development',
-  companyAddress: '',          // CAN-SPAM: a valid physical postal address must appear in every email
-  optOutLine: "If you'd rather not hear from me, reply \"unsubscribe\" and I won't email you again.",
+  companyAddress: '',          // CAN-SPAM: a valid postal address (street, P.O. box or registered mailbox) must appear in every email; shown in the signature
+  optOutLine: "P.S. If this isn't relevant, just let me know and I won't follow up.",
   templates: DEFAULT_TEMPLATES,
 };
 

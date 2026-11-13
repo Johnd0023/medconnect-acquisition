@@ -122,7 +122,7 @@ test('full pipeline', async () => {
   assert.match(results[3].reason, /Nothing due|limit/);
   const sent = await q(`SELECT * FROM messages WHERE status = 'sent' ORDER BY id`);
   assert.equal(sent.length, 3);
-  assert.ok(sent.every((m) => m.body.includes('100 Main St') && m.body.toLowerCase().includes('unsubscribe')), 'footer with address + opt-out');
+  assert.ok(sent.every((m) => m.body.includes('100 Main St') && m.body.includes("won't follow up") && !m.body.includes('\n--\n')), 'footer with address + opt-out');
   const nw = sent.find((m) => m.to_email === 'jfox@northwindrmc.org');
   assert.ok(nw, 'listing recruiter chosen for Northwind');
   assert.match(nw.body, /one of 2 openings/);

@@ -39,9 +39,16 @@ export function render(tpl, f) {
   return { subject: sub(tpl.subject), body: sub(tpl.body), missing: [...missing] };
 }
 
-export function footer(settings) {
-  const parts = [settings.optOutLine, settings.companyAddress ? `MedConnect Staffing · ${settings.companyAddress}` : ''];
-  return parts.filter(Boolean).join('\n');
+const OLD_OPT_OUT = "If you'd rather not hear from me, reply \"unsubscribe\" and I won't email you again.";
+export const DEFAULT_OPT_OUT = "P.S. If this isn't relevant, just let me know and I won't follow up.";
+
+/** The address goes in the signature, under the company name, like a normal business signature. */
+export function withSignature(body, settings) {
+  const text = body.replace(/\s+$/, '');
+  const addr = (settings.companyAddress || '').trim();
+  const signed = !addr ? text : /MedConnect Staffing$/i.test(text) ? `${text}\n${addr}` : `${text}\nMedConnect Staffing\n${addr}`;
+  const optOut = !settings.optOutLine || settings.optOutLine === OLD_OPT_OUT ? DEFAULT_OPT_OUT : settings.optOutLine;
+  return `${signed}\n\n${optOut}`;
 }
 
 /** Compose the email for `step` (0 = initial, 1-2 = follow-ups). */
@@ -56,5 +63,5 @@ export function compose(emp, contact, openings, step, settings) {
   if (posting && /@practicematch\.com$/i.test(contact.email) && !/opportunity\s+\S+/i.test(r.subject)) r.subject = `Opportunity ${posting.pm_code} | ${r.subject}`;
   if (!settings.companyAddress) r.missing.push('company_address (Settings → Sender)');
   if (!/[a-z]/i.test(r.subject)) r.missing.push('subject');
-  return { ...r, body: `${r.body}\n\n--\n${footer(settings)}`, template: t[key].label, key };
+  return { ...r, body: withSignature(r.body, settings), template: t[key].label, key };
 }
