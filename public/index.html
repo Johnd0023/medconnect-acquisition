@@ -264,7 +264,7 @@ async function renderNav() {
   const s = o.send;
   document.getElementById("clock").innerHTML = `<span>${fmtTime(o.now)} ET</span>
     <span>${o.mode.paused ? '<span class="pill p-bad">Paused</span>' : o.mode.dryRun ? '<span class="pill p-warn">Dry run</span>' : o.mode.supervised ? '<span class="pill p-warn">Supervised</span>' : '<span class="pill p-good">Automated</span>'}</span>
-    <span><strong>${s.sent}</strong> of ${s.cap} sent today</span>
+    <span><strong>${s.sent}</strong> of ${s.cap} ${s.dryRun ? "practice emails today (dry run, none sent)" : "sent today"}</span>
     <span>${s.canSend ? "Sending is open" : esc(s.reason)}</span>
     <a class="btn sm" href="/logout" style="text-decoration:none">Sign out</a>`;
 }
@@ -321,7 +321,7 @@ async function renderOutreach() {
   const d = await api("/api/outreach");
   const s = d.send;
   return modeBanner(ui.overview?.mode) + `<div class="head"><div><h1>Outreach Activity</h1><p>Three emails per sequence. Follow-ups reply in the same Outlook thread. A reply, opt-out, bounce or protection match stops the sequence before the next send.</p></div>
-  <div class="actions"><span class="sub">${s.sent} / ${s.cap} today · ${s.canSend ? "sending open" : esc(s.reason)}</span><button class="btn primary" data-act="sendNow" ${d.due.length && s.canSend ? "" : "disabled"}>Send next email now</button></div></div>
+  <div class="actions"><span class="sub">${s.sent} / ${s.cap} ${s.dryRun ? "practice emails today (dry run: nothing is sent)" : "sent today"} · ${s.canSend ? "sending open" : esc(s.reason)}</span><button class="btn primary" data-act="sendNow" ${d.due.length && s.canSend ? "" : "disabled"}>Send next email now</button></div></div>
   <section class="card"><div class="ch"><h2>Due now · ${d.due.length}</h2><span class="sub">Sent one at a time, spaced ${ui.settingsData ? ui.settingsData.settings.minGapSeconds + "–" + ui.settingsData.settings.maxGapSeconds + " seconds" : "randomly"}, inside the send window</span></div>${d.due.length ? `<div class="tablewrap"><table><thead><tr><th>Employer</th><th>To</th><th>Step</th></tr></thead><tbody>${d.due.map((x) => `<tr class="click" data-open="${x.employer_id}"><td><b>${esc(x.name)}</b></td><td>${esc(x.full_name)}<div class="sub mono">${esc(x.email)}</div></td><td>${x.step === 0 ? "Initial" : "Follow-up " + x.step}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Nothing due right now.</div>'}</section>
   <div class="grid2">
   <section class="card"><div class="ch"><h2>Scheduled</h2><span class="sub">${d.upcoming.length}</span></div>${d.upcoming.length ? `<div class="tablewrap"><table><tbody>${d.upcoming.map((x) => `<tr class="click" data-open="${x.employer_id}"><td><b>${esc(x.name)}</b><div class="sub">${esc(x.full_name)}</div></td><td>${x.step === 0 ? "Initial" : "Follow-up " + x.step}</td><td class="n">${fmtTime(x.next_at)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">No future sends scheduled.</div>'}</section>
