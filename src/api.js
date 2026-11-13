@@ -305,9 +305,10 @@ export const routes = {
 
   // Client contact database
   'GET /api/contacts': async ({ query }) => {
-    const rows = await listContacts({ search: query.q, source: query.source, state: query.state, status: query.status, direct: query.direct, limit: 3000 });
+    const rows = await listContacts({ search: query.q, source: query.source, state: query.state, status: query.status, direct: query.direct, limit: 20000 });
     const totals = await one(`SELECT count(*)::int AS contacts, count(DISTINCT employer_id)::int AS clients, count(*) FILTER (WHERE email IS NOT NULL AND email NOT ILIKE '%@practicematch.com')::int AS direct FROM contacts`);
-    return { rows: rows.slice(0, 1000), shown: Math.min(rows.length, 1000), matched: rows.length, totals, statuses: STATUSES };
+    const size = 50; const pages = Math.max(1, Math.ceil(rows.length / size)); const page = Math.min(Math.max(0, Number(query.page) || 0), pages - 1);
+    return { rows: rows.slice(page * size, page * size + size), page, pages, matched: rows.length, totals, statuses: STATUSES };
   },
   'GET /api/contacts/export': async ({ query }) => exportContacts({ search: query.q, source: query.source, state: query.state, status: query.status, direct: query.direct }),
   'POST /api/contacts': async ({ body }) => createContact(body),

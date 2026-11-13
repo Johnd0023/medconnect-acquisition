@@ -92,6 +92,13 @@ main{padding:24px 30px 60px;display:flex;flex-direction:column;gap:20px;min-widt
 .pipe span{font-size:12px;color:var(--muted)}
 
 .tablewrap{overflow-x:auto}
+.ctable{table-layout:fixed;width:100%}
+.ctable td{padding:8px 10px;overflow-wrap:anywhere;font-size:13px;line-height:1.4}
+.ctable th{padding:8px 10px}
+.ctable .sm{font-size:12px}
+.ctable .pill{white-space:nowrap}
+.cnote{width:100%;min-height:32px;max-height:120px;font:inherit;font-size:12.5px;line-height:1.35;padding:6px 8px;resize:vertical}
+.cnote:focus{min-height:70px}
 table{width:100%;border-collapse:collapse}
 th{text-align:left;font-weight:600;font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--sunk)}
 td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -198,7 +205,7 @@ const fmtTime = (d) => d ? new Date(d).toLocaleString("en-US", { timeZone: TZ, m
 const VIEWS = [["today", "Today's Opportunities"], ["queue", "Prospect Queue"], ["outreach", "Outreach Activity"], ["responses", "Response Queue"], ["contacts", "Client Contacts"], ["performance", "Performance"], ["settings", "Settings"]];
 const CAT_LABEL = { interested: "Interested", not_now: "Not right now", referral: "Referral", wrong_contact: "Wrong contact", opt_out: "Opt-out", ooo: "Out of office", bounce: "Bounced", other: "Other reply" };
 const CAT_PILL = { interested: "p-good", referral: "p-info", not_now: "p-mute", wrong_contact: "p-warn", opt_out: "p-bad", ooo: "p-mute", bounce: "p-bad", other: "p-mute" };
-let ui = { cf: { q: "", source: "", status: "", state: "", direct: false }, queueTab: "review", drawer: null, tpl: "initial_opening", overview: null, settingsData: null };
+let ui = { cf: { q: "", source: "", status: "", state: "", direct: false }, cpage: 0, queueTab: "review", drawer: null, tpl: "initial_opening", overview: null, settingsData: null };
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { method: opts.method || "GET", headers: opts.body ? { "Content-Type": "application/json" } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined, credentials: "same-origin" });
@@ -525,7 +532,7 @@ function contactQuery() {
 }
 async function renderContacts() {
   const qs = contactQuery();
-  const d = await api(`/api/contacts${qs ? "?" + qs : ""}`);
+  const d = await api(`/api/contacts?${qs ? qs + "&" : ""}page=${ui.cpage}`);
   const f = ui.cf;
   const jobsCell = (r) => r.jobs.length ? r.jobs.slice(0, 2).map((j) => `<div>${j.url ? `<a href="${esc(j.url)}" target="_blank" rel="noopener">${esc(j.title || "Job post")}</a>` : esc(j.title || "Job post")}${j.code ? ` <span class="mono sub">${esc(j.code)}</span>` : ""}</div>`).join("") + (r.jobs.length > 2 ? `<div class="sub">+${r.jobs.length - 2} more</div>` : "") : "";
   return `<div class="head"><div><h1>Client Contacts</h1><p>Every client contact found through PracticeMatch, Lusha or added by you, with where you found them, the client they're with and what's happened since.</p></div><div class="actions"><a class="btn primary" style="text-decoration:none" href="/api/contacts/export${qs ? "?" + qs : ""}" download>Export to Excel${qs ? " (filtered)" : ""}</a></div></div>
@@ -536,7 +543,7 @@ async function renderContacts() {
     <div class="field" style="width:90px"><label for="cf-state">State</label><input type="text" id="cf-state" data-cf="state" maxlength="2" placeholder="TX" value="${esc(f.state)}"></div>
     <label style="display:flex;gap:6px;align-items:center;padding-bottom:9px"><input type="checkbox" data-cf="direct"${f.direct ? " checked" : ""}> Direct emails only</label>
   </div>
-  <div class="cb sub" style="padding-top:0">${d.totals.contacts} contacts at ${d.totals.clients} clients · ${d.totals.direct} with a direct email (the rest reach the client through PracticeMatch's forwarding address)${d.matched !== d.totals.contacts ? ` · <b>${d.matched} match these filters</b>` : ""}${d.matched > d.shown ? ` · showing the first ${d.shown}; the export has all of them` : ""}</div></section>
+  <div class="cb sub" style="padding-top:0">${d.totals.contacts} contacts at ${d.totals.clients} clients · ${d.totals.direct} with a direct email (the rest reach the client through PracticeMatch's forwarding address)${d.matched !== d.totals.contacts ? ` · <b>${d.matched} match these filters</b>` : ""}</div></section>
 
   <section class="card"><details><summary class="ch" style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px"><h2>+ Add a contact</h2><span class="sub">Someone you met, a referral, a client you're working yourself</span></summary><div class="cb grid2">
     ${[["nc-name", "Name", "Jane Smith"], ["nc-title", "Title", "Director of Physician Recruitment"], ["nc-email", "Email", "jane@hospital.org"], ["nc-phone", "Phone", "(555) 555-0100"], ["nc-company", "Client / company (required)", "Riverside Regional Medical Center"], ["nc-web", "Website (optional)", "riversideregional.org"], ["nc-city", "City", ""], ["nc-state", "State", "TX"]].map(([id, l, ph]) => `<div class="field"><label for="${id}">${l}</label><input type="text" id="${id}" placeholder="${esc(ph)}"></div>`).join("")}
@@ -545,13 +552,15 @@ async function renderContacts() {
     <div class="actions" style="grid-column:1/-1"><button class="btn primary sm" data-act="addContactDb">Save contact</button></div>
   </div></details></section>
 
-  <section class="card">${d.rows.length ? `<div class="tablewrap"><table><thead><tr><th>Contact</th><th>Email / phone</th><th>Client</th><th>Found via</th><th>Outreach</th><th style="min-width:200px">Notes</th></tr></thead><tbody>${d.rows.map((r) => `<tr>
-      <td><b>${esc(r.name || "—")}</b>${r.title ? `<div class="sub">${esc(r.title)}</div>` : ""}</td>
-      <td>${r.email ? `<a class="mono" href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : '<span class="sub">no email</span>'}${r.relay ? '<div class="sub">PracticeMatch forwarding address</div>' : ""}${r.phone ? `<div class="mono sub">${esc(r.phone)}</div>` : ""}</td>
-      <td><a href="#contacts" data-open="${r.employer_id}">${esc(r.employer)}</a><div class="sub">${esc([r.type, [r.city, r.state].filter(Boolean).join(", ")].filter(Boolean).join(" · "))}</div>${r.domain ? `<div class="sub mono">${esc(r.domain)}</div>` : ""}</td>
-      <td>${srcChips(r.sources)}<div class="sub">${esc(r.foundVia.join(", "))}</div>${jobsCell(r)}<div class="sub">Added ${fmtShort(r.created_at)}</div></td>
-      <td><span class="pill ${OUT_PILL[r.outreach] || "p-mute"}">${esc(r.outreach)}</span>${r.sent_count ? `<div class="sub">${r.sent_count} sent · last ${fmtShort(r.last_sent)}</div>` : ""}${r.lastReplyLabel ? `<div class="sub">${esc(r.lastReplyLabel)} · ${fmtShort(r.last_reply_at)}</div>` : ""}</td>
-      <td><textarea class="prose" data-cnote="${r.id}" style="min-height:44px;font-size:12.5px" placeholder="Add a note">${esc(r.notes || "")}</textarea></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">No contacts match. Contacts appear here as PracticeMatch scans and Lusha find them, or when you add one.</div>'}</section>`;
+  <section class="card">${d.rows.length ? `<table class="ctable"><colgroup><col style="width:27%"><col style="width:21%"><col style="width:21%"><col style="width:12%"><col style="width:19%"></colgroup>
+    <thead><tr><th>Contact</th><th>Client</th><th>Found via</th><th>Outreach</th><th>Notes</th></tr></thead><tbody>${d.rows.map((r) => `<tr>
+      <td><b>${esc(r.name || "—")}</b>${r.title ? `<span class="sub"> · ${esc(r.title)}</span>` : ""}
+        <div>${r.email ? `<a class="mono sm" href="mailto:${esc(r.email)}">${esc(r.email)}</a>${r.relay ? ' <span class="sub">(PM forwarding)</span>' : ""}` : '<span class="sub">no email</span>'}</div>${r.phone ? `<div class="mono sm sub">${esc(r.phone)}</div>` : ""}</td>
+      <td><a href="#contacts" data-open="${r.employer_id}" title="${esc(r.type || "")}">${esc(r.employer)}</a><div class="sub">${esc([r.city, r.state].filter(Boolean).join(", "))}</div></td>
+      <td>${srcChips(r.sources)} <span class="sub">${fmtShort(r.created_at)}</span>${r.jobs[0] ? `<div class="sm">${r.jobs[0].url ? `<a href="${esc(r.jobs[0].url)}" target="_blank" rel="noopener">${esc(r.jobs[0].title || "Job post")}</a>` : esc(r.jobs[0].title || "Job post")}${r.jobs.length > 1 ? ` <span class="sub">+${r.jobs.length - 1}</span>` : ""}</div>` : ""}</td>
+      <td><span class="pill ${OUT_PILL[r.outreach] || "p-mute"}">${esc(r.outreach)}</span>${r.sent_count ? `<div class="sub">${r.sent_count} sent · ${fmtShort(r.last_sent)}</div>` : ""}</td>
+      <td><textarea class="cnote" data-cnote="${r.id}" rows="1" placeholder="Add a note">${esc(r.notes || "")}</textarea></td></tr>`).join("")}</tbody></table>
+    ${d.pages > 1 ? `<div class="cb" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><button class="btn sm" data-cpage="${d.page - 1}"${d.page <= 0 ? " disabled" : ""}>← Previous</button><span class="sub">Page ${d.page + 1} of ${d.pages} · ${d.matched} contacts</span><button class="btn sm" data-cpage="${d.page + 1}"${d.page >= d.pages - 1 ? " disabled" : ""}>Next →</button></div>` : ""}` : '<div class="empty">No contacts match. Contacts appear here as PracticeMatch scans and Lusha find them, or when you add one.</div>'}</section>`;
 }
 
 /* ---------------- drawer ---------------- */
@@ -695,6 +704,7 @@ document.addEventListener("click", async (ev) => {
       }
     }
   }
+  const cp = t.closest("[data-cpage]"); if (cp && !cp.disabled) { ui.cpage = Number(cp.dataset.cpage); await renderAll(); return window.scrollTo(0, 0); }
   const o = t.closest("[data-open]"); if (o && !t.closest("button")) { ev.preventDefault(); ui.drawer = o.dataset.open; return renderDrawer().catch((e) => toast(e.message, true)); }
 });
 
@@ -711,7 +721,7 @@ document.addEventListener("change", async (ev) => {
     return saveSetting({ brochure: { steps: vals } });
   }
   if (t.dataset.cnote) { try { await api(`/api/contacts/${t.dataset.cnote}`, { method: "PATCH", body: { notes: t.value } }); toast("Note saved"); } catch (e) { toast(e.message, true); } return; }
-  if (t.dataset.cf) { ui.cf[t.dataset.cf] = t.type === "checkbox" ? t.checked : t.value.trim(); return renderAll(); }
+  if (t.dataset.cf) { ui.cf[t.dataset.cf] = t.type === "checkbox" ? t.checked : t.value.trim(); ui.cpage = 0; return renderAll(); }
   if (t.dataset.task) return act(api(`/api/tasks/${t.dataset.task}/done`, { method: "POST", body: {} }), "Task completed");
   if (t.dataset.pick) {
     const ids = [...document.querySelectorAll("[data-pick]:checked")].map((x) => Number(x.dataset.pick));
@@ -749,7 +759,7 @@ document.addEventListener("change", async (ev) => {
 });
 document.addEventListener("input", (ev) => {
   if (ev.target.id === "qsearch") { clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
-  if (ev.target.id === "cq") { ui.cf.q = ev.target.value; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
+  if (ev.target.id === "cq") { ui.cf.q = ev.target.value; ui.cpage = 0; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
   if (ev.target.id === "tpl-body" || ev.target.id === "tpl-subject") { clearTimeout(previewTimer); previewTimer = setTimeout(previewTemplate, 400); }
 });
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && ui.drawer) { ui.drawer = null; renderDrawer(); } });
