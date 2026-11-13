@@ -228,3 +228,21 @@ CREATE TABLE IF NOT EXISTS files (
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment text;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS notes text;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS name_from_email boolean NOT NULL DEFAULT false;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS track_token text;
+CREATE UNIQUE INDEX IF NOT EXISTS messages_track_token_uq ON messages (track_token) WHERE track_token IS NOT NULL;
+CREATE TABLE IF NOT EXISTS email_events (
+  id          bigserial PRIMARY KEY,
+  message_id  int NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  kind        text NOT NULL,
+  at          timestamptz NOT NULL DEFAULT now(),
+  ua          text,
+  ip          text,
+  machine     boolean NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS email_events_message_ix ON email_events (message_id, kind);
+CREATE TABLE IF NOT EXISTS domain_health (
+  day         date PRIMARY KEY,
+  score       int NOT NULL,
+  details     jsonb NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);

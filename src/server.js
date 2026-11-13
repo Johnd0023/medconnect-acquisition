@@ -11,6 +11,8 @@ import { handleIngest, ALLOWED_ORIGINS } from './ingest.js';
 import { collectorScript } from './collector.js';
 import { brochureBySlug } from './brochure.js';
 import { fillNamesFromEmail } from './contacts.js';
+import { recordEvent, PIXEL } from './tracking.js';
+import { getSettings } from './settings.js';
 
 assertCoreConfig();
 
@@ -84,8 +86,23 @@ const server = http.createServer(async (req, res) => {
       await pool.query('SELECT 1');
       return send(res, 200, { ok: true });
     }
+    // Open pixel and tracked brochure link (public: email recipients aren't signed in)
+    const om = url.pathname.match(/^\/o\/([\w-]{10,40})\.gif$/);
+    if (om) {
+      await recordEvent(om[1], 'open', req).catch(() => null);
+      res.writeHead(200, { 'Content-Type': 'image/gif', 'Content-Length': PIXEL.length, 'Cache-Control': 'no-store, no-cache, must-revalidate, private', Pragma: 'no-cache' });
+      return res.end(PIXEL);
+    }
+    const rm = url.pathname.match(/^\/r\/([\w-]{10,40})$/);
+    if (rm) {
+      await recordEvent(rm[1], 'click', req).catch(() => null);
+      const target = (await getSettings()).brochure?.url?.trim();
+      res.writeHead(target && /^https?:\/\//i.test(target) ? 302 : 404, target ? { Location: target, 'Cache-Control': 'no-store' } : { 'Content-Type': 'text/plain' });
+      return res.end(target ? '' : 'Link not available');
+    }
     // The brochure link in emails: public (clients aren't signed in), unguessable URL, nothing else exposed
     const bm = url.pathname.match(/^\/b\/([A-Za-z0-9_-]{8,40})\/[^/]*$/);
+    if (bm && req.method === 'GET' && url.searchParams.get('m')) await recordEvent(url.searchParams.get('m'), 'click', req).catch(() => null);
     if (bm && req.method === 'GET') {
       const f = await brochureBySlug(bm[1]);
       if (!f) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('This brochure is no longer available.'); }

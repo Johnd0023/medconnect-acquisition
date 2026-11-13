@@ -8,6 +8,7 @@ import { zoned, hhmmToMin } from './util.js';
 import { runDiscovery, runPracticeMatchScan } from './engine/discovery.js';
 import { pollReplies } from './engine/replies.js';
 import { sendTick } from './engine/outreach.js';
+import { runHealthCheck } from './health.js';
 
 const running = new Set();
 
@@ -47,6 +48,10 @@ export async function tick(now = new Date()) {
     for (const t of (P.scanTimes || []).slice(1)) {
       if (minutes >= hhmmToMin(t)) await guarded('pm-scan', () => runJob('pm-scan', `${z.ymd}#${t}`, () => runPracticeMatchScan({ autoEnroll: true })));
     }
+  }
+
+  if (minutes >= hhmmToMin(s.healthCheckTime || '07:00')) {
+    await guarded('health', () => runJob('health', z.ymd, () => runHealthCheck().then((h) => ({ score: h.score, status: h.status }))));
   }
 
   const slot = Math.floor(minutes / Math.max(1, s.replyPollMinutes));

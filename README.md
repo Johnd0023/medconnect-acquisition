@@ -130,6 +130,12 @@ The **Client Contacts** page lists every contact the system has found or you add
 
 **Export to Excel** downloads an .xlsx with two sheets, Contacts and Clients, using the current filters. **Add a contact** saves someone you met or a referral; a new client added this way is held, so the automation never emails them unless you tick the box.
 
+## Opens, clicks and email health
+
+Every live email carries a 1×1 image (opens) and a tracked brochure link (clicks). Opens and clicks within 90 seconds of sending, or from security scanners (Mimecast, Proofpoint, Safe Links…), are counted as machine activity and left out of the rates. Turn tracking off with `tracking.opens` / `tracking.clicks` in settings.
+
+At 7:00 AM ET a health check scores medconnectstaffing.com 0–100: SPF, DKIM and DMARC records, domain blocklists (Spamhaus DBL, SURBL, URIBL, for both your domain and the link domain), bounce rate, spam-filter rejections, open rate and reply rate. Results and a 30-day trend are on the Performance page. Sending pauses automatically if your domain is blocklisted, 3+ spam-filter rejections arrive in a week, or bounces pass 8%.
+
 ## Brochure
 
 Settings → Brochure: upload a PDF (up to 3 MB), then choose **Off**, **As a link** or **As an attachment**, and which emails carry it (first email, follow-up 1, follow-up 2). One sentence is added just above the sign-off, or wherever a template has `{{brochure}}`.

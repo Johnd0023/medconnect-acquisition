@@ -165,6 +165,9 @@ export const DEFAULT_SETTINGS = {
     tagline: 'Connecting People. Improving Healthcare.',
     logo: true,
   },
+  // --- open/click tracking (machine opens from security scanners are filtered out of the rates) ---
+  tracking: { opens: true, clicks: true },
+  healthCheckTime: '07:00',
   // --- brochure: off | link | attach, on the chosen emails (0 = first email, 1-2 = follow-ups) ---
   brochure: {
     mode: 'off',

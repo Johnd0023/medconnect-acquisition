@@ -4,6 +4,8 @@ import { cfg, integrations } from './config.js';
 import { getSettings, saveSettings, DEFAULT_TEMPLATES, EMPLOYER_TYPES } from './settings.js';
 import { loadContext, requalify, requalifyAll, rankContacts, isUsable, protectionMatch, prospectDecision, selectedContacts } from './engine/qualify.js';
 import { compose } from './engine/compose.js';
+import { engagement } from './tracking.js';
+import { runHealthCheck, healthHistory } from './health.js';
 import { listContacts, updateContact, createContact, exportContacts, STATUSES } from './contacts.js';
 import { brochureFor, brochureMeta, publicUrl, saveBrochure, deleteBrochure } from './brochure.js';
 import { enroll, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
@@ -80,7 +82,10 @@ export const routes = {
       q('SELECT * FROM openings WHERE employer_id = $1 ORDER BY active DESC, posted_at DESC NULLS LAST', [e.id]),
       q('SELECT * FROM contacts WHERE employer_id = $1 ORDER BY id', [e.id]),
       q('SELECT * FROM sequences WHERE employer_id = $1 ORDER BY started_at DESC', [e.id]),
-      q('SELECT id, step, to_email, subject, status, error, sent_at FROM messages WHERE employer_id = $1 ORDER BY sent_at', [e.id]),
+      q(`SELECT m.id, m.step, m.to_email, m.subject, m.status, m.error, m.sent_at,
+          (SELECT min(at) FROM email_events x WHERE x.message_id = m.id AND x.kind = 'open' AND NOT x.machine) AS opened_at,
+          (SELECT min(at) FROM email_events x WHERE x.message_id = m.id AND x.kind = 'click' AND NOT x.machine) AS clicked_at
+        FROM messages m WHERE m.employer_id = $1 ORDER BY m.sent_at`, [e.id]),
       q('SELECT * FROM replies WHERE employer_id = $1 ORDER BY received_at', [e.id]),
       q('SELECT at, text FROM events WHERE employer_id = $1 ORDER BY at DESC LIMIT 100', [e.id]),
     ]);
@@ -204,7 +209,7 @@ export const routes = {
     const upcoming = await q(`SELECT s.*, e.name, c.full_name FROM sequences s JOIN employers e ON e.id = s.employer_id JOIN contacts c ON c.id = s.contact_id
                               WHERE s.status = 'active' AND s.next_at > now() ORDER BY s.next_at LIMIT 200`);
     const stopped = await q(`SELECT s.*, e.name FROM sequences s JOIN employers e ON e.id = s.employer_id WHERE s.status <> 'active' ORDER BY s.started_at DESC LIMIT 100`);
-    const log = await q(`SELECT m.id, m.employer_id, e.name, m.to_email, m.subject, m.status, m.error, m.step, m.sent_at FROM messages m JOIN employers e ON e.id = m.employer_id ORDER BY m.sent_at DESC LIMIT 100`);
+    const log = await q(`SELECT m.id, m.employer_id, e.name, m.to_email, m.subject, m.status, m.error, m.step, m.sent_at, EXISTS (SELECT 1 FROM email_events x WHERE x.message_id = m.id AND x.kind = 'open' AND NOT x.machine) AS opened, EXISTS (SELECT 1 FROM email_events x WHERE x.message_id = m.id AND x.kind = 'click' AND NOT x.machine) AS clicked FROM messages m JOIN employers e ON e.id = m.employer_id ORDER BY m.sent_at DESC LIMIT 100`);
     return { send: { ...st, settings: undefined }, due, upcoming, stopped, log };
   },
 
@@ -282,8 +287,23 @@ export const routes = {
         (SELECT count(DISTINCT employer_id) FROM replies WHERE category IN ('interested','referral')) AS positive,
         (SELECT count(*) FROM meetings) AS meetings,
         (SELECT count(*) FROM replies WHERE category = 'bounce') AS bounces`);
-    return { kpis: Object.fromEntries(Object.entries(k).map(([a, b]) => [a, Number(b)])), bySource, daily, credits: await lusha.creditsUsed() };
+    const byStep = await q(`SELECT m.step, count(*)::int AS sent,
+        count(*) FILTER (WHERE EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id AND e.kind = 'open' AND NOT e.machine))::int AS opened,
+        count(*) FILTER (WHERE EXISTS (SELECT 1 FROM email_events e WHERE e.message_id = m.id AND e.kind = 'click' AND NOT e.machine))::int AS clicked,
+        count(*) FILTER (WHERE EXISTS (SELECT 1 FROM replies r WHERE r.message_id = m.id AND r.category NOT IN ('ooo','bounce')))::int AS replied
+      FROM messages m WHERE m.status = 'sent' AND m.track_token IS NOT NULL GROUP BY m.step ORDER BY m.step`);
+    const opensDaily = await q(`SELECT d::date AS day,
+        (SELECT count(DISTINCT e.message_id) FROM email_events e WHERE e.kind = 'open' AND NOT e.machine AND (e.at AT TIME ZONE $1)::date = d::date)::int AS opens,
+        (SELECT count(DISTINCT e.message_id) FROM email_events e WHERE e.kind = 'click' AND NOT e.machine AND (e.at AT TIME ZONE $1)::date = d::date)::int AS clicks
+      FROM generate_series((now() AT TIME ZONE $1)::date - 13, (now() AT TIME ZONE $1)::date, interval '1 day') d ORDER BY d`, [cfg.timezone]);
+    const machine = await one(`SELECT count(*) FILTER (WHERE machine)::int AS machine, count(*)::int AS total FROM email_events`);
+    return {
+      kpis: Object.fromEntries(Object.entries(k).map(([a, b]) => [a, Number(b)])), bySource, daily, credits: await lusha.creditsUsed(),
+      engagement: { all: await engagement(), week: await engagement(7), byStep, opensDaily, machine },
+      health: await healthHistory(30),
+    };
   },
+  'POST /api/health/run': async () => { const h = await runHealthCheck(); return { ok: true, message: `Email health: ${h.score}/100 (${h.status})` }; },
 
   'GET /api/settings': async () => {
     const protectedAccounts = await q('SELECT id, name, domain FROM protected_accounts ORDER BY name');
