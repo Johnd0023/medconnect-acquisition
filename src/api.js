@@ -311,8 +311,8 @@ export const routes = {
     const emp = { id: 0, name: 'Riverside Regional Medical Center', type: 'HS', city: 'Dallas', state: 'TX', domain: 'riversideregional.org' };
     const openings = key === 'initial_general' ? [] : [
       { active: true, specialty: 'Cardiology', role: 'Physician', title: 'Cardiology Physician', city: 'Dallas', state: 'TX', posted_at: new Date().toISOString(), contact_email: 'liz@riversideregional.org' },
-      { active: true, specialty: 'Hospitalist', role: 'Physician', city: 'Dallas', state: 'TX', posted_at: new Date(Date.now() - 864e5).toISOString() },
-      { active: true, specialty: 'Family Medicine', role: 'Nurse Practitioner', city: 'Plano', state: 'TX', posted_at: new Date(Date.now() - 2 * 864e5).toISOString() },
+      { active: true, specialty: 'Hospitalist', role: 'Physician', city: 'Dallas', state: 'TX', contact_email: 'liz@riversideregional.org', posted_at: new Date(Date.now() - 864e5).toISOString() },
+      { active: true, specialty: 'Family Medicine', role: 'Nurse Practitioner', city: 'Plano', state: 'TX', contact_email: 'liz@riversideregional.org', posted_at: new Date(Date.now() - 2 * 864e5).toISOString() },
     ];
     const bro = await brochureFor(step, settings, { lineOnly: true });
     const m = compose(emp, { email: 'liz@riversideregional.org', first_name: 'Liz' }, openings, step, settings, bro);
