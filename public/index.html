@@ -382,7 +382,7 @@ function healthCard(hist) {
   const bars = hist.map((x, i) => { const v = x.score; const c = v >= 85 ? "var(--good)" : v >= 65 ? "var(--warn)" : "var(--bad)"; const hh = Math.max(2, (v / 100) * (H - 4));
     return `<rect x="${(30 - hist.length + i) * bw + 1}" y="${H - hh}" width="${bw - 2}" height="${hh}" rx="1.5" fill="${c}"><title>${esc(String(x.day).slice(0, 10))}: ${v}</title></rect>`; }).join("");
   const groups = [...new Set(h.checks.map((c) => c.group))];
-  return `<section class="card"><div class="ch"><h2>Email health · ${esc(h.domain)}</h2><div class="actions"><span class="sub">Checked ${fmtTime(today.details.checkedAt || today.created_at || today.day)}</span><button class="btn sm" data-act="runHealth">Check again</button></div></div>
+  return `<section class="card"><div class="ch"><h2>Email health · ${esc(h.domain)}</h2><div class="actions"><span class="sub">Checked ${fmtTime(today.created_at)}</span><button class="btn sm" data-act="runHealth">Check again</button></div></div>
     <div class="cb" style="display:grid;grid-template-columns:minmax(200px,260px) 1fr;gap:22px;align-items:start">
       <div><div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:44px;font-weight:700;color:${color};line-height:1">${sc}</span><span class="sub">/ 100</span></div>
         <span class="pill ${sc >= 85 ? "p-good" : sc >= 65 ? "p-warn" : "p-bad"}" style="margin-top:6px">${esc(h.status)}</span>

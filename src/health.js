@@ -96,5 +96,5 @@ export async function runHealthCheck({ domain = 'medconnectstaffing.com' } = {})
 }
 
 export async function healthHistory(days = 30) {
-  return q(`SELECT day, score, details FROM domain_health WHERE day >= (now() AT TIME ZONE $1)::date - $2::int ORDER BY day`, [cfg.timezone, days]);
+  return q(`SELECT day, score, details, created_at FROM domain_health WHERE day >= (now() AT TIME ZONE $1)::date - $2::int ORDER BY day`, [cfg.timezone, days]);
 }
