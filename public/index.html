@@ -195,10 +195,10 @@ const TZ = "America/New_York";
 const fmtDay = (d) => d ? new Date(d).toLocaleDateString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" }) : "—";
 const fmtShort = (d) => d ? new Date(d).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" }) : "—";
 const fmtTime = (d) => d ? new Date(d).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
-const VIEWS = [["today", "Today's Opportunities"], ["queue", "Prospect Queue"], ["outreach", "Outreach Activity"], ["responses", "Response Queue"], ["performance", "Performance"], ["settings", "Settings"]];
+const VIEWS = [["today", "Today's Opportunities"], ["queue", "Prospect Queue"], ["outreach", "Outreach Activity"], ["responses", "Response Queue"], ["contacts", "Client Contacts"], ["performance", "Performance"], ["settings", "Settings"]];
 const CAT_LABEL = { interested: "Interested", not_now: "Not right now", referral: "Referral", wrong_contact: "Wrong contact", opt_out: "Opt-out", ooo: "Out of office", bounce: "Bounced", other: "Other reply" };
 const CAT_PILL = { interested: "p-good", referral: "p-info", not_now: "p-mute", wrong_contact: "p-warn", opt_out: "p-bad", ooo: "p-mute", bounce: "p-bad", other: "p-mute" };
-let ui = { queueTab: "review", drawer: null, tpl: "initial_opening", overview: null, settingsData: null };
+let ui = { cf: { q: "", source: "", status: "", state: "", direct: false }, queueTab: "review", drawer: null, tpl: "initial_opening", overview: null, settingsData: null };
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { method: opts.method || "GET", headers: opts.body ? { "Content-Type": "application/json" } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined, credentials: "same-origin" });
@@ -251,7 +251,7 @@ async function renderNav() {
   const o = ui.overview;
   const v = view();
   const c = o?.counts || {};
-  const badge = o ? { today: o.fresh.length, queue: (c.ready || 0) + (c.review || 0) + (c.contact || 0), outreach: o.send.due, responses: o.totals.unhandled } : {};
+  const badge = o ? { today: o.fresh.length, queue: (c.ready || 0) + (c.review || 0) + (c.contact || 0), outreach: o.send.due, responses: o.totals.unhandled, contacts: o.totals.contacts } : {};
   document.getElementById("nav").innerHTML = VIEWS.map(([k, l]) => `<a href="#${k}"${v === k ? ' aria-current="page"' : ""}><span>${l}</span>${badge[k] !== undefined ? `<span class="count">${badge[k]}</span>` : ""}</a>`).join("");
   if (!o) return;
   const s = o.send;
@@ -516,6 +516,44 @@ async function renderSettings() {
   </div></section>`;
 }
 
+/* ---------------- client contacts ---------------- */
+const OUT_PILL = { "Not contacted": "p-mute", "In sequence": "p-info", "Emailed": "p-info", "Interested": "p-good", "Replied": "p-good", "Not right now": "p-warn", "Do not contact": "p-bad", "Current client": "p-warn" };
+function contactQuery() {
+  const f = ui.cf; const p = new URLSearchParams();
+  if (f.q) p.set("q", f.q); if (f.source) p.set("source", f.source); if (f.status) p.set("status", f.status); if (f.state) p.set("state", f.state); if (f.direct) p.set("direct", "1");
+  return p.toString();
+}
+async function renderContacts() {
+  const qs = contactQuery();
+  const d = await api(`/api/contacts${qs ? "?" + qs : ""}`);
+  const f = ui.cf;
+  const jobsCell = (r) => r.jobs.length ? r.jobs.slice(0, 2).map((j) => `<div>${j.url ? `<a href="${esc(j.url)}" target="_blank" rel="noopener">${esc(j.title || "Job post")}</a>` : esc(j.title || "Job post")}${j.code ? ` <span class="mono sub">${esc(j.code)}</span>` : ""}</div>`).join("") + (r.jobs.length > 2 ? `<div class="sub">+${r.jobs.length - 2} more</div>` : "") : "";
+  return `<div class="head"><div><h1>Client Contacts</h1><p>Every client contact found through PracticeMatch, Lusha or added by you, with where you found them, the client they're with and what's happened since.</p></div><div class="actions"><a class="btn primary" style="text-decoration:none" href="/api/contacts/export${qs ? "?" + qs : ""}" download>Export to Excel${qs ? " (filtered)" : ""}</a></div></div>
+  <section class="card"><div class="cb" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+    <div class="field" style="flex:2;min-width:220px"><label for="cq">Search</label><input type="text" id="cq" placeholder="Name, email, title, client, city or notes" value="${esc(f.q)}"></div>
+    <div class="field" style="min-width:150px"><label for="cf-src">Found via</label><select id="cf-src" data-cf="source"><option value="">Anywhere</option>${[["PM", "PracticeMatch"], ["Lusha", "Lusha"], ["Manual", "Added by you"]].map(([v, l]) => `<option value="${v}"${f.source === v ? " selected" : ""}>${l}</option>`).join("")}</select></div>
+    <div class="field" style="min-width:150px"><label for="cf-st">Outreach status</label><select id="cf-st" data-cf="status"><option value="">Any</option>${d.statuses.map((x) => `<option${f.status === x ? " selected" : ""}>${esc(x)}</option>`).join("")}</select></div>
+    <div class="field" style="width:90px"><label for="cf-state">State</label><input type="text" id="cf-state" data-cf="state" maxlength="2" placeholder="TX" value="${esc(f.state)}"></div>
+    <label style="display:flex;gap:6px;align-items:center;padding-bottom:9px"><input type="checkbox" data-cf="direct"${f.direct ? " checked" : ""}> Direct emails only</label>
+  </div>
+  <div class="cb sub" style="padding-top:0">${d.totals.contacts} contacts at ${d.totals.clients} clients · ${d.totals.direct} with a direct email (the rest reach the client through PracticeMatch's forwarding address)${d.matched !== d.totals.contacts ? ` · <b>${d.matched} match these filters</b>` : ""}${d.matched > d.shown ? ` · showing the first ${d.shown}; the export has all of them` : ""}</div></section>
+
+  <section class="card"><details><summary class="ch" style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px"><h2>+ Add a contact</h2><span class="sub">Someone you met, a referral, a client you're working yourself</span></summary><div class="cb grid2">
+    ${[["nc-name", "Name", "Jane Smith"], ["nc-title", "Title", "Director of Physician Recruitment"], ["nc-email", "Email", "jane@hospital.org"], ["nc-phone", "Phone", "(555) 555-0100"], ["nc-company", "Client / company (required)", "Riverside Regional Medical Center"], ["nc-web", "Website (optional)", "riversideregional.org"], ["nc-city", "City", ""], ["nc-state", "State", "TX"]].map(([id, l, ph]) => `<div class="field"><label for="${id}">${l}</label><input type="text" id="${id}" placeholder="${esc(ph)}"></div>`).join("")}
+    <div class="field" style="grid-column:1/-1"><label for="nc-notes">Notes</label><textarea id="nc-notes" class="prose" style="min-height:70px" placeholder="Met at the TMA conference, hiring 2 hospitalists in Q1"></textarea></div>
+    <div class="field" style="grid-column:1/-1"><label><input type="checkbox" id="nc-out"> Also let the automation email this client</label><span class="hint">Off: the client is held, so nothing goes out automatically. You keep the contact for your own outreach.</span></div>
+    <div class="actions" style="grid-column:1/-1"><button class="btn primary sm" data-act="addContactDb">Save contact</button></div>
+  </div></details></section>
+
+  <section class="card">${d.rows.length ? `<div class="tablewrap"><table><thead><tr><th>Contact</th><th>Email / phone</th><th>Client</th><th>Found via</th><th>Outreach</th><th style="min-width:200px">Notes</th></tr></thead><tbody>${d.rows.map((r) => `<tr>
+      <td><b>${esc(r.name || "—")}</b>${r.title ? `<div class="sub">${esc(r.title)}</div>` : ""}</td>
+      <td>${r.email ? `<a class="mono" href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : '<span class="sub">no email</span>'}${r.relay ? '<div class="sub">PracticeMatch forwarding address</div>' : ""}${r.phone ? `<div class="mono sub">${esc(r.phone)}</div>` : ""}</td>
+      <td><a href="#contacts" data-open="${r.employer_id}">${esc(r.employer)}</a><div class="sub">${esc([r.type, [r.city, r.state].filter(Boolean).join(", ")].filter(Boolean).join(" · "))}</div>${r.domain ? `<div class="sub mono">${esc(r.domain)}</div>` : ""}</td>
+      <td>${srcChips(r.sources)}<div class="sub">${esc(r.foundVia.join(", "))}</div>${jobsCell(r)}<div class="sub">Added ${fmtShort(r.created_at)}</div></td>
+      <td><span class="pill ${OUT_PILL[r.outreach] || "p-mute"}">${esc(r.outreach)}</span>${r.sent_count ? `<div class="sub">${r.sent_count} sent · last ${fmtShort(r.last_sent)}</div>` : ""}${r.lastReplyLabel ? `<div class="sub">${esc(r.lastReplyLabel)} · ${fmtShort(r.last_reply_at)}</div>` : ""}</td>
+      <td><textarea class="prose" data-cnote="${r.id}" style="min-height:44px;font-size:12.5px" placeholder="Add a note">${esc(r.notes || "")}</textarea></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">No contacts match. Contacts appear here as PracticeMatch scans and Lusha find them, or when you add one.</div>'}</section>`;
+}
+
 /* ---------------- drawer ---------------- */
 async function fillBookmarklet() {
   const a = document.getElementById("pm-bookmarklet");
@@ -554,11 +592,11 @@ async function renderAll() {
     ui.overview = await api("/api/overview");
     await renderNav();
     const v = view();
-    const html = await ({ today: renderToday, queue: renderQueue, outreach: renderOutreach, responses: renderResponses, performance: renderPerformance, settings: renderSettings })[v]();
+    const html = await ({ today: renderToday, queue: renderQueue, outreach: renderOutreach, responses: renderResponses, contacts: renderContacts, performance: renderPerformance, settings: renderSettings })[v]();
     const m = document.getElementById("main");
     const focusId = document.activeElement?.id; const pos = document.activeElement?.selectionStart;
     m.innerHTML = html;
-    if (focusId === "qsearch") { const el = document.getElementById("qsearch"); el.focus(); try { el.setSelectionRange(pos, pos); } catch {} }
+    if (focusId === "qsearch" || focusId === "cq") { const el = document.getElementById(focusId); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch {} } }
     if (v === "settings") { await fillBookmarklet(); previewTemplate(); }
     await renderDrawer();
   } catch (e) { toast(e.message, true); }
@@ -618,6 +656,10 @@ document.addEventListener("click", async (ev) => {
       case "pollReplies": return act(api("/api/jobs/replies", { method: "POST", body: {} }).then((r) => ({ message: r.summary.reason || `${r.summary.checked} inbox messages checked, ${r.summary.matched} replies matched` })));
       case "bulk": return act(api("/api/queue/bulk", { method: "POST", body: { action: a.dataset.v } }));
       case "delBrochure": return act(api("/api/brochure", { method: "DELETE", body: {} }));
+      case "addContactDb": {
+        const v = (id) => document.getElementById(id)?.value || "";
+        return act(api("/api/contacts", { method: "POST", body: { name: v("nc-name"), title: v("nc-title"), email: v("nc-email"), phone: v("nc-phone"), company: v("nc-company"), website: v("nc-web"), city: v("nc-city"), state: v("nc-state"), notes: v("nc-notes"), outreach: document.getElementById("nc-out")?.checked } }));
+      }
       case "addProtected": return act(api("/api/protected", { method: "POST", body: { text: document.getElementById("prot-add").value } }));
       case "disconnect": return act(api("/api/outlook/disconnect", { method: "POST", body: {} }), "Outlook disconnected");
       case "testEmail": return act(api("/api/outlook/test", { method: "POST", body: {} }));
@@ -668,6 +710,8 @@ document.addEventListener("change", async (ev) => {
     const vals = [...document.querySelectorAll("[data-bstep]:checked")].map((x) => Number(x.dataset.bstep));
     return saveSetting({ brochure: { steps: vals } });
   }
+  if (t.dataset.cnote) { try { await api(`/api/contacts/${t.dataset.cnote}`, { method: "PATCH", body: { notes: t.value } }); toast("Note saved"); } catch (e) { toast(e.message, true); } return; }
+  if (t.dataset.cf) { ui.cf[t.dataset.cf] = t.type === "checkbox" ? t.checked : t.value.trim(); return renderAll(); }
   if (t.dataset.task) return act(api(`/api/tasks/${t.dataset.task}/done`, { method: "POST", body: {} }), "Task completed");
   if (t.dataset.pick) {
     const ids = [...document.querySelectorAll("[data-pick]:checked")].map((x) => Number(x.dataset.pick));
@@ -705,6 +749,7 @@ document.addEventListener("change", async (ev) => {
 });
 document.addEventListener("input", (ev) => {
   if (ev.target.id === "qsearch") { clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
+  if (ev.target.id === "cq") { ui.cf.q = ev.target.value; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
   if (ev.target.id === "tpl-body" || ev.target.id === "tpl-subject") { clearTimeout(previewTimer); previewTimer = setTimeout(previewTemplate, 400); }
 });
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && ui.drawer) { ui.drawer = null; renderDrawer(); } });

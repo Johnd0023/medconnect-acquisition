@@ -124,6 +124,12 @@ Every email, from any source (PracticeMatch, Lusha, import, manual), is checked 
 
 A blocked email stops the sequence and writes "Email … BLOCKED: matches protected client" to the employer's history. Clients added to the list later are honored at the next send.
 
+## Client Contacts (database and Excel export)
+
+The **Client Contacts** page lists every contact the system has found or you added: name, title, email, phone, the client they're with (type, city, state, website), where you found them (PracticeMatch with the job post and code, Lusha, or added by you), outreach status (not contacted, in sequence, emailed, interested, replied, do not contact, current client) and your own notes. Search and filter by source, status and state, or show direct emails only (hiding PracticeMatch forwarding addresses).
+
+**Export to Excel** downloads an .xlsx with two sheets, Contacts and Clients, using the current filters. **Add a contact** saves someone you met or a referral; a new client added this way is held, so the automation never emails them unless you tick the box.
+
 ## Brochure
 
 Settings → Brochure: upload a PDF (up to 3 MB), then choose **Off**, **As a link** or **As an attachment**, and which emails carry it (first email, follow-up 1, follow-up 2). One sentence is added just above the sign-off, or wherever a template has `{{brochure}}`.

@@ -226,3 +226,4 @@ CREATE TABLE IF NOT EXISTS files (
   uploaded_at  timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment text;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS notes text;

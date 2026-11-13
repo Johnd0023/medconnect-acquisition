@@ -159,6 +159,11 @@ const server = http.createServer(async (req, res) => {
       const raw = req.method === 'GET' ? '' : await readBody(req);
       const body = raw ? JSON.parse(raw) : {};
       const result = await route.fn({ params, body, query: Object.fromEntries(url.searchParams), req });
+      if (result?.__file) {
+        const f = result.__file;
+        res.writeHead(200, { 'Content-Type': f.type, 'Content-Length': f.data.length, 'Content-Disposition': `attachment; filename="${f.name}"`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        return res.end(f.data);
+      }
       return send(res, 200, result ?? { ok: true });
     }
 

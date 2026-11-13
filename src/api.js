@@ -4,6 +4,7 @@ import { cfg, integrations } from './config.js';
 import { getSettings, saveSettings, DEFAULT_TEMPLATES, EMPLOYER_TYPES } from './settings.js';
 import { loadContext, requalify, requalifyAll, rankContacts, isUsable, protectionMatch, prospectDecision, selectedContacts } from './engine/qualify.js';
 import { compose } from './engine/compose.js';
+import { listContacts, updateContact, createContact, exportContacts, STATUSES } from './contacts.js';
 import { brochureFor, brochureMeta, publicUrl, saveBrochure, deleteBrochure } from './brochure.js';
 import { enroll, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
 import { runDiscovery, importListings, lushaFillContacts, resolveIndustries, runPracticeMatchScan } from './engine/discovery.js';
@@ -302,6 +303,15 @@ export const routes = {
     return { ok: true, settings: s };
   },
 
+  // Client contact database
+  'GET /api/contacts': async ({ query }) => {
+    const rows = await listContacts({ search: query.q, source: query.source, state: query.state, status: query.status, direct: query.direct, limit: 3000 });
+    const totals = await one(`SELECT count(*)::int AS contacts, count(DISTINCT employer_id)::int AS clients, count(*) FILTER (WHERE email IS NOT NULL AND email NOT ILIKE '%@practicematch.com')::int AS direct FROM contacts`);
+    return { rows: rows.slice(0, 1000), shown: Math.min(rows.length, 1000), matched: rows.length, totals, statuses: STATUSES };
+  },
+  'GET /api/contacts/export': async ({ query }) => exportContacts({ search: query.q, source: query.source, state: query.state, status: query.status, direct: query.direct }),
+  'POST /api/contacts': async ({ body }) => createContact(body),
+  'PATCH /api/contacts/:id': async ({ params, body }) => updateContact(Number(params.id), body),
   // Live preview of a template being edited, filled with sample data, exactly as the email will look
   'POST /api/templates/preview': async ({ body }) => {
     const s = await getSettings();
