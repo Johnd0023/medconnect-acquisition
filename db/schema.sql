@@ -253,3 +253,5 @@ CREATE TABLE IF NOT EXISTS lusha_balance (
   remaining  int,
   checked_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE employers ADD COLUMN IF NOT EXISTS drafts jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE sequences ADD COLUMN IF NOT EXISTS priority int NOT NULL DEFAULT 0;

@@ -137,7 +137,7 @@ async function claimNext(settings) {
       WHERE s.status = 'active' AND s.next_at <= now()
         AND (s.claimed_at IS NULL OR s.claimed_at < now() - interval '10 minutes')
         AND (SELECT count(*) FROM messages m WHERE m.employer_id = s.employer_id AND m.sent_at >= $1) < $2
-      ORDER BY s.step DESC, s.next_at ASC
+      ORDER BY s.priority DESC, s.step DESC, s.next_at ASC
       LIMIT 1 FOR UPDATE SKIP LOCKED)
     RETURNING *`, [startOfBusinessDay(), settings.perEmployerPerDay]);
 }
@@ -211,6 +211,7 @@ export async function sendTick({ force = false } = {}) {
   await q(`INSERT INTO messages (sequence_id, employer_id, contact_id, step, to_email, subject, body, status, error, graph_id, internet_message_id, conversation_id, attachment, track_token)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
   [seq.id, emp.id, contact.id, seq.step, recipients.map((c) => c.email).join(', '), m.subject, m.body, status, error, result.graphId || null, result.internetMessageId || null, result.conversationId || null, m.attachment, status === 'sent' ? trackToken : null]);
+  if (seq.priority) await q('UPDATE sequences SET priority = 0 WHERE id = $1', [seq.id]);
   await kvSet('next_send_at', new Date(Date.now() + randInt(s.minGapSeconds, s.maxGapSeconds) * 1000).toISOString());
 
   const label = seq.step === 0 ? 'Initial email' : `Follow-up ${seq.step}`;

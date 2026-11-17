@@ -3,7 +3,7 @@ import { q, one, logEvent, kvGet } from './db.js';
 import { cfg, integrations } from './config.js';
 import { getSettings, saveSettings, DEFAULT_TEMPLATES, EMPLOYER_TYPES } from './settings.js';
 import { loadContext, requalify, requalifyAll, rankContacts, isUsable, protectionMatch, prospectDecision, selectedContacts } from './engine/qualify.js';
-import { compose } from './engine/compose.js';
+import { compose, draftFor } from './engine/compose.js';
 import { engagement } from './tracking.js';
 import { runHealthCheck, healthHistory } from './health.js';
 import { listContacts, updateContact, createContact, exportContacts, STATUSES } from './contacts.js';
@@ -149,6 +149,27 @@ export const routes = {
     };
   },
 
+  'GET /api/employers/:id/draft': async ({ params, query }) => {
+    const e = await one('SELECT * FROM employers WHERE id = $1', [Number(params.id)]);
+    if (!e) throw httpError(404, 'Employer not found');
+    const step = [0, 1, 2].includes(Number(query.step)) ? Number(query.step) : 0;
+    const [openings, contacts] = await Promise.all([q('SELECT * FROM openings WHERE employer_id = $1', [e.id]), q('SELECT * FROM contacts WHERE employer_id = $1', [e.id])]);
+    const ctx = await loadContext();
+    const c = selectedContacts(e, contacts, openings, ctx)[0] || contacts[0] || {};
+    return { step, ...draftFor(e, c, openings, step, await getSettings()) };
+  },
+  'PUT /api/employers/:id/draft': async ({ params, body }) => {
+    const id = Number(params.id); const step = String([0, 1, 2].includes(Number(body.step)) ? Number(body.step) : 0);
+    const subject = String(body.subject || '').trim().slice(0, 300); const text = String(body.body || '').trim().slice(0, 20000);
+    if (!text) throw httpError(400, 'The email body is empty.');
+    await q(`UPDATE employers SET drafts = jsonb_set(coalesce(drafts, '{}'::jsonb), ARRAY[$2], $3::jsonb) WHERE id = $1`, [id, step, JSON.stringify({ subject, body: text, at: new Date() })]);
+    await logEvent(id, `Email ${Number(step) === 0 ? 'one' : `follow-up ${step}`} edited by owner`);
+    return { ok: true, message: 'Email saved for this client' };
+  },
+  'DELETE /api/employers/:id/draft': async ({ params, query }) => {
+    await q(`UPDATE employers SET drafts = drafts - $2 WHERE id = $1`, [Number(params.id), String(Number(query.step) || 0)]);
+    return { ok: true, message: 'Back to the template' };
+  },
   'POST /api/employers/:id/action': async ({ params, body }) => {
     const id = Number(params.id);
     const e = await one('SELECT * FROM employers WHERE id = $1', [id]);
@@ -161,6 +182,26 @@ export const routes = {
       case 'suppress': await setDecision('suppressed', 'Suppressed by owner'); await stopSequence(id, 'Suppressed by owner'); break;
       case 'unsuppress': await setDecision(null, 'Restored by owner'); break;
       case 'recontact': await setDecision('recontact', 'Cleared for a new outreach attempt'); break;
+      case 'rename': {
+        const name = String(body.name || '').trim().slice(0, 200);
+        if (!name) throw httpError(400, 'Enter a name.');
+        await q('UPDATE employers SET name = $2, norm_name = $3 WHERE id = $1', [id, name, normName(name)]);
+        await logEvent(id, `Renamed from "${e.name}" to "${name}"`);
+        break;
+      }
+      case 'sendFirst': {
+        // Approve if needed, enroll if not in outreach yet, put this client's next email at the front of the line
+        const active = await one(`SELECT count(*)::int AS n FROM sequences WHERE employer_id = $1 AND status = 'active'`, [id]);
+        if (!active.n) {
+          if (e.decision !== 'approved' && e.decision !== 'recontact') await setDecision('approved', 'Approved by owner (send first)');
+          await requalify(id);
+          await enroll(id);
+        }
+        await q(`UPDATE sequences SET priority = 1, next_at = LEAST(coalesce(next_at, now()), now()) WHERE employer_id = $1 AND status = 'active'`, [id]);
+        await logEvent(id, 'Moved to the front of the send line by owner');
+        const r = await sendTick({ force: true });
+        return { ok: true, message: r.sent ? `Sent now to ${r.to}.` : `First in line. ${/window|limit|cap|blocked|Outlook/i.test(r.reason || '') ? `It goes out as soon as sending opens (${r.reason}).` : 'It goes out next.'}` };
+      }
       case 'enroll': { const c = await enroll(id); return { ok: true, message: `Enrolled. First email to ${c.email} goes out in the next send window.` }; }
       case 'pause': await stopSequence(id, 'Paused by owner', 'paused'); break;
       case 'resume': await clearSendBlock(); await resumeSequence(id); break;

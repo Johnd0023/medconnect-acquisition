@@ -254,6 +254,7 @@ export function evaluate(emp, openings, contacts, seqs, ctx) {
     else {
       const active = openings.filter((o) => o.active);
       const restr = active.find((o) => o.restriction);
+      if (/[*#]{2}|open to (firms|agencies)|^\W|^(all|n\/a|none|confidential)$/i.test(emp.name.trim())) reasons.push(`Client name "${emp.name}" looks like a posting note: rename it before emailing`);
       if (restr && s.respectNoAgency) reasons.push(`Listing ${restr.external_id} says: "${restr.restriction}"`);
       if (emp.type === T.UNKNOWN) reasons.push('Could not determine employer type');
       else if (!s.types.includes(emp.type)) reasons.push(`Employer type not targeted: ${emp.type}`);
