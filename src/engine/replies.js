@@ -86,14 +86,49 @@ export async function applyReply(reply, message) {
       await logEvent(empId, `Client suppressed (${reply.category === 'bounce' ? 'bounce' : 'opt-out'} via PracticeMatch forwarding address)`);
       await stopSequence(empId, 'Opt-out via PracticeMatch forwarding address');
     } else {
-      await q(`INSERT INTO suppressions (kind, value, reason) VALUES ('email', $1, $2) ON CONFLICT DO NOTHING`, [contact.email.toLowerCase(), reply.category === 'bounce' ? 'Bounced' : 'Opted out']);
+      await optOutEmail(contact.email, {
+        reason: reply.category === 'bounce' ? 'Bounced' : 'Opted out', source: 'reply', contactName: contact.full_name,
+        employerId: empId, detail: String(reply.body_preview || reply.subject || '').split(/\n\s*(From:|-----Original|On .+ wrote:)/)[0].trim().slice(0, 300),
+      });
+      // They may have replied from a different address than the one we emailed: block that one too
+      if (reply.category === 'opt_out' && reply.from_email && reply.from_email.toLowerCase() !== contact.email.toLowerCase() && !isRelay(reply.from_email)) {
+        await optOutEmail(reply.from_email, { reason: 'Opted out', source: 'reply', contactName: contact.full_name, employerId: empId, detail: `Same person as ${contact.email}` });
+      }
     }
+    if (reply.category === 'opt_out') await q('UPDATE replies SET handled = true WHERE id = $1', [reply.id]); // nothing for the owner to do
   }
   if (contact && (reply.category === 'wrong_contact' || reply.category === 'bounce')) await q('UPDATE contacts SET bad = true WHERE id = $1', [contact.id]);
   if (reply.category === 'interested') {
     await q(`INSERT INTO tasks (employer_id, text, due_date) VALUES ($1, $2, (now() AT TIME ZONE $3)::date + 1)`, [empId, `Call ${contact?.full_name || reply.from_email}: replied interested`, cfg.timezone]);
   }
   await requalify(empId);
+}
+
+/**
+ * Opt someone out everywhere: add them to the do-not-email list and end every running sequence that would
+ * email them (at any client, as the main recipient or CC'd on a shared email). Used for replies and manual adds.
+ */
+export async function optOutEmail(email, { reason = 'Opted out', source = 'manual', contactName = null, employerId = null, detail = null } = {}) {
+  const e = String(email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw Object.assign(new Error('Enter a valid email address.'), { status: 400 });
+  const emp = employerId ? await one('SELECT name FROM employers WHERE id = $1', [employerId]) : null;
+  const known = await one(`SELECT c.full_name, c.employer_id, em.name FROM contacts c JOIN employers em ON em.id = c.employer_id WHERE lower(c.email) = $1 ORDER BY c.id LIMIT 1`, [e]);
+  await q(`INSERT INTO suppressions (kind, value, reason, source, contact_name, employer_id, employer_name, detail) VALUES ('email', $1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (kind, value) DO UPDATE SET reason = EXCLUDED.reason, source = coalesce(suppressions.source, EXCLUDED.source),
+             contact_name = coalesce(suppressions.contact_name, EXCLUDED.contact_name), employer_id = coalesce(suppressions.employer_id, EXCLUDED.employer_id),
+             employer_name = coalesce(suppressions.employer_name, EXCLUDED.employer_name), detail = coalesce(EXCLUDED.detail, suppressions.detail)`,
+  [e, reason, source, contactName || known?.full_name || null, employerId || known?.employer_id || null, emp?.name || known?.name || null, detail]);
+  const contacts = await q('SELECT id, employer_id FROM contacts WHERE lower(email) = $1', [e]);
+  let stopped = 0;
+  for (const c of contacts) {
+    for (const s of await q(`SELECT id, contact_id FROM sequences WHERE status IN ('active','paused') AND (contact_id = $1 OR $1 = ANY(cc_contact_ids))`, [c.id])) {
+      if (s.contact_id === c.id) { await stopSequenceById(s.id, `${reason}: ${e}`); stopped++; }
+      else { await q('UPDATE sequences SET cc_contact_ids = array_remove(cc_contact_ids, $2) WHERE id = $1', [s.id, c.id]); stopped++; }
+    }
+    await logEvent(c.employer_id, `${e} added to the opt-out list (${reason.toLowerCase()})`);
+    await requalify(c.employer_id).catch(() => null);
+  }
+  return { email: e, stopped };
 }
 
 export async function pollReplies() {

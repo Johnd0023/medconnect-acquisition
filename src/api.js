@@ -10,7 +10,8 @@ import { listContacts, updateContact, createContact, exportContacts, STATUSES } 
 import { brochureFor, brochureMeta, publicUrl, saveBrochure, deleteBrochure } from './brochure.js';
 import { enroll, readyIds, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
 import { runDiscovery, importListings, lushaFillContacts, resolveIndustries, runPracticeMatchScan } from './engine/discovery.js';
-import { pollReplies, referralFrom } from './engine/replies.js';
+import { pollReplies, referralFrom, optOutEmail } from './engine/replies.js';
+import { writeXlsx } from './xlsx.js';
 import { addContact, inferType } from './engine/ingest.js';
 import { runJob } from './scheduler.js';
 import { ingestToken, starter } from './collector.js';
@@ -76,7 +77,7 @@ export const routes = {
     const due = Number((await one(`SELECT count(*) AS n FROM sequences WHERE status = 'active' AND next_at <= now()`)).n);
     const totals = await one(`SELECT (SELECT count(*) FROM employers) AS employers, (SELECT count(*) FROM contacts) AS contacts,
       (SELECT count(*) FROM sequences WHERE status = 'active') AS active, (SELECT count(*) FROM replies) AS replies,
-      (SELECT count(*) FROM replies WHERE NOT handled) AS unhandled, (SELECT count(*) FROM tasks WHERE NOT done) AS tasks`);
+      (SELECT count(*) FROM replies WHERE NOT handled) AS unhandled, (SELECT count(*) FROM suppressions WHERE kind = 'email' AND reason = 'Opted out') AS optouts, (SELECT count(*) FROM tasks WHERE NOT done) AS tasks`);
     return {
       now: new Date(), timezone: cfg.timezone, counts, fresh: await Promise.all(fresh.map(async (e) => employerRow(e, ctxAll))),
       lastRun, lastScan, send: { ...st, settings: undefined, due }, totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, Number(v)])),
@@ -291,6 +292,14 @@ export const routes = {
     const done = () => q('UPDATE replies SET handled = true WHERE id = $1', [r.id]);
     switch (body.action) {
       case 'handled': await done(); break;
+      case 'optout': {
+        const c = r.contact_id ? await one('SELECT email, full_name FROM contacts WHERE id = $1', [r.contact_id]) : null;
+        const email = (c?.email && !/@practicematch\.com$/i.test(c.email) ? c.email : r.from_email);
+        await optOutEmail(email, { reason: 'Opted out', source: 'reply', contactName: c?.full_name, employerId: r.employer_id, detail: String(r.body_preview || '').slice(0, 300) });
+        await q(`UPDATE replies SET category = 'opt_out' WHERE id = $1`, [r.id]);
+        await done();
+        return { ok: true, message: `${email} opted out of all future emails` };
+      }
       case 'meeting':
         await q('INSERT INTO meetings (employer_id, reply_id) VALUES ($1, $2)', [r.employer_id, r.id]);
         await q('UPDATE tasks SET done = true WHERE employer_id = $1', [r.employer_id]);
@@ -411,6 +420,38 @@ export const routes = {
     return { ok: true, settings: s };
   },
 
+  // Opt-out list: everyone who asked not to be emailed (and bounced addresses), newest first
+  'GET /api/optouts': async ({ query }) => {
+    const kind = ['opt', 'bounce'].includes(query.kind) ? query.kind : 'all';
+    const search = String(query.q || '').trim();
+    const rows = await q(`SELECT s.id, s.kind, s.value, s.reason, s.source, s.detail, s.created_at,
+        coalesce(s.contact_name, c.full_name) AS name, coalesce(s.employer_name, e.name) AS employer, coalesce(s.employer_id, e.id) AS employer_id
+      FROM suppressions s
+      LEFT JOIN LATERAL (SELECT * FROM contacts c WHERE s.kind = 'email' AND lower(c.email) = s.value ORDER BY c.id LIMIT 1) c ON true
+      LEFT JOIN employers e ON e.id = c.employer_id
+      WHERE ($1 = 'all' OR ($1 = 'opt' AND s.reason <> 'Bounced') OR ($1 = 'bounce' AND s.reason = 'Bounced'))
+        AND ($2 = '' OR s.value ILIKE '%' || $2 || '%' OR coalesce(s.contact_name, c.full_name, '') ILIKE '%' || $2 || '%' OR coalesce(s.employer_name, e.name, '') ILIKE '%' || $2 || '%')
+      ORDER BY s.created_at DESC LIMIT 2000`, [kind, search]);
+    const counts = await one(`SELECT count(*) FILTER (WHERE reason <> 'Bounced')::int AS opt, count(*) FILTER (WHERE reason = 'Bounced')::int AS bounce, count(*)::int AS all FROM suppressions`);
+    return { rows, counts, kind };
+  },
+  'POST /api/optouts': async ({ body }) => {
+    const r = await optOutEmail(body.email, { reason: 'Opted out', source: 'manual', detail: String(body.note || '').slice(0, 300) || 'Added by you' });
+    return { ok: true, message: `${r.email} opted out${r.stopped ? `; ${r.stopped} running sequence${r.stopped > 1 ? 's' : ''} stopped` : ''}` };
+  },
+  'DELETE /api/optouts/:id': async ({ params }) => {
+    const s = await one('DELETE FROM suppressions WHERE id = $1 RETURNING value', [Number(params.id)]);
+    await requalifyAll();
+    return { ok: true, message: s ? `${s.value} can be emailed again` : 'Removed' };
+  },
+  'GET /api/optouts/export': async () => {
+    const rows = await q(`SELECT s.value, s.reason, s.source, s.detail, s.created_at, coalesce(s.contact_name, c.full_name) AS name, coalesce(s.employer_name, e.name) AS employer
+      FROM suppressions s LEFT JOIN LATERAL (SELECT * FROM contacts c WHERE lower(c.email) = s.value ORDER BY c.id LIMIT 1) c ON true LEFT JOIN employers e ON e.id = c.employer_id
+      ORDER BY s.created_at DESC`);
+    const data = writeXlsx([{ name: 'Opt-outs', columns: [{ header: 'Name', width: 24 }, { header: 'Email', width: 34 }, { header: 'Client', width: 32 }, { header: 'Type', width: 12 }, { header: 'Date', width: 12 }, { header: 'How', width: 14 }, { header: 'What they said / note', width: 60 }],
+      rows: rows.map((r) => [r.name || '', r.value, r.employer || '', r.reason === 'Bounced' ? 'Bounced' : 'Opted out', new Date(r.created_at).toISOString().slice(0, 10), r.source === 'manual' ? 'Added by you' : r.source === 'reply' ? 'Email reply' : '', r.detail || '']) }]);
+    return { __file: { name: `MedConnect-Opt-outs-${new Date().toISOString().slice(0, 10)}.xlsx`, type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', data } };
+  },
   // Client contact database
   'GET /api/contacts': async ({ query }) => {
     const rows = await listContacts({ search: query.q, source: query.source, state: query.state, status: query.status, direct: query.direct, limit: 20000 });

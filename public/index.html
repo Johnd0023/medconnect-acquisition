@@ -202,7 +202,7 @@ const TZ = "America/New_York";
 const fmtDay = (d) => d ? new Date(d).toLocaleDateString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" }) : "—";
 const fmtShort = (d) => d ? new Date(d).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" }) : "—";
 const fmtTime = (d) => d ? new Date(d).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
-const VIEWS = [["today", "Today's Opportunities"], ["queue", "Prospect Queue"], ["outreach", "Outreach Activity"], ["responses", "Response Queue"], ["contacts", "Client Contacts"], ["performance", "Performance"], ["settings", "Settings"]];
+const VIEWS = [["today", "Today's Opportunities"], ["queue", "Prospect Queue"], ["outreach", "Outreach Activity"], ["responses", "Response Queue"], ["optouts", "Opt-outs"], ["contacts", "Client Contacts"], ["performance", "Performance"], ["settings", "Settings"]];
 const CAT_LABEL = { interested: "Interested", not_now: "Not right now", referral: "Referral", wrong_contact: "Wrong contact", opt_out: "Opt-out", ooo: "Out of office", bounce: "Bounced", other: "Other reply" };
 const CAT_PILL = { interested: "p-good", referral: "p-info", not_now: "p-mute", wrong_contact: "p-warn", opt_out: "p-bad", ooo: "p-mute", bounce: "p-bad", other: "p-mute" };
 let ui = { cf: { q: "", source: "", status: "", state: "", direct: false }, cpage: 0, queueTab: "review", drawer: null, tpl: "initial_opening", overview: null, settingsData: null };
@@ -258,7 +258,7 @@ async function renderNav() {
   const o = ui.overview;
   const v = view();
   const c = o?.counts || {};
-  const badge = o ? { today: o.fresh.length, queue: (c.ready || 0) + (c.review || 0) + (c.contact || 0), outreach: o.send.due, responses: o.totals.unhandled, contacts: o.totals.contacts } : {};
+  const badge = o ? { today: o.fresh.length, queue: (c.ready || 0) + (c.review || 0) + (c.contact || 0), outreach: o.send.due, responses: o.totals.unhandled, contacts: o.totals.contacts, optouts: o.totals.optouts } : {};
   document.getElementById("nav").innerHTML = VIEWS.map(([k, l]) => `<a href="#${k}"${v === k ? ' aria-current="page"' : ""}><span>${l}</span>${badge[k] !== undefined ? `<span class="count">${badge[k]}</span>` : ""}</a>`).join("");
   if (!o) return;
   const s = o.send;
@@ -338,7 +338,7 @@ async function renderResponses() {
   const card = (r) => `<div class="card"><div class="cb" style="display:flex;flex-direction:column;gap:8px">
     <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div><b>${esc(r.contact_name || r.from_email)}</b>${r.contact_title ? " · " + esc(r.contact_title) : ""}<div class="sub"><a href="#responses" data-open="${r.employer_id}">${esc(r.employer_name)}</a> · ${fmtTime(r.received_at)}</div></div><span class="pill ${CAT_PILL[r.category]}">${CAT_LABEL[r.category]}</span></div>
     <div class="email"><div class="subj">${esc(r.subject)}</div>${esc((r.body_preview || "").slice(0, 900))}</div>
-    <div class="actions">${r.category === "interested" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="meeting">Mark meeting booked</button>` : ""}${r.category === "referral" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="useReferral">Add referral and enroll</button>` : ""}${r.category === "wrong_contact" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="nextContact">Find another contact</button>` : ""}${r.category === "ooo" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="resumeOoo">Resume in 7 days</button>` : ""}<button class="btn sm" data-rep="${r.id}" data-a="task">Add follow-up task</button><button class="btn sm" data-rep="${r.id}" data-a="handled">Mark handled</button></div>
+    <div class="actions">${r.category === "interested" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="meeting">Mark meeting booked</button>` : ""}${r.category === "referral" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="useReferral">Add referral and enroll</button>` : ""}${r.category === "wrong_contact" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="nextContact">Find another contact</button>` : ""}${r.category === "ooo" ? `<button class="btn sm primary" data-rep="${r.id}" data-a="resumeOoo">Resume in 7 days</button>` : ""}<button class="btn sm" data-rep="${r.id}" data-a="task">Add follow-up task</button><button class="btn sm" data-rep="${r.id}" data-a="handled">Mark handled</button>${r.category !== "opt_out" && r.category !== "bounce" ? `<button class="btn sm danger" data-rep="${r.id}" data-a="optout" title="Never email this person again">Opt out</button>` : ""}</div>
   </div></div>`;
   return `<div class="head"><div><h1>Response Queue</h1><p>The inbox is checked every few minutes. Replies stop the sequence, opt-outs and bounces go to the suppression list, and interested replies create a call task.</p></div><div class="actions"><button class="btn" data-act="pollReplies">Check inbox now</button></div></div>
   <div class="grid2"><section style="display:flex;flex-direction:column;gap:10px"><h2>Needs you · ${open.length}</h2>${open.length ? open.map(card).join("") : '<div class="card empty">You\'re caught up.</div>'}</section>
@@ -597,6 +597,25 @@ async function renderSettings() {
   </div></section>`;
 }
 
+/* ---------------- opt-outs ---------------- */
+async function renderOptouts() {
+  const f = ui.oo || { kind: "opt", q: "" };
+  const d = await api(`/api/optouts?kind=${f.kind}&q=${encodeURIComponent(f.q)}`);
+  const tabs = [["opt", "Opted out", d.counts.opt], ["bounce", "Bounced", d.counts.bounce], ["all", "All", d.counts.all]];
+  return `<div class="head"><div><h1>Opt-outs</h1><p>Everyone on this list is never emailed again, by any sequence, from any source. When someone replies asking to be removed, they're added here automatically and every running sequence that includes them stops.</p></div><div class="actions"><input type="text" id="ooq" placeholder="Search name, email or client" value="${esc(f.q)}" style="width:230px"><a class="btn primary" style="text-decoration:none" href="/api/optouts/export" download>Export to Excel</a></div></div>
+  <div class="tabs" role="group" aria-label="Opt-out list">${tabs.map(([k, l, n]) => `<button class="tab" data-ookind="${k}" aria-pressed="${f.kind === k}">${l}<span class="c">${n}</span></button>`).join("")}</div>
+  <section class="card"><details><summary class="ch" style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center"><h2>+ Opt someone out by hand</h2><span class="sub">Someone who asked by phone, or an address you never want emailed</span></summary>
+    <div class="cb" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end"><div class="field" style="flex:1;min-width:220px"><label for="oo-email">Email</label><input type="text" id="oo-email" placeholder="name@hospital.org"></div><div class="field" style="flex:2;min-width:220px"><label for="oo-note">Note (optional)</label><input type="text" id="oo-note" placeholder="Asked on the phone 11/17"></div><button class="btn primary sm" data-act="addOptout">Opt out</button></div></details></section>
+  <section class="card">${d.rows.length ? `<table class="ctable"><colgroup><col style="width:22%"><col style="width:22%"><col style="width:12%"><col style="width:34%"><col style="width:10%"></colgroup>
+    <thead><tr><th>Who</th><th>Client</th><th>Date</th><th>What they said</th><th></th></tr></thead><tbody>${d.rows.map((r) => `<tr>
+      <td><b>${esc(r.name || "—")}</b><div class="mono sm">${esc(r.value)}</div>${r.kind === "domain" ? '<div class="sub">Whole domain</div>' : ""}</td>
+      <td>${r.employer_id ? `<a href="#optouts" data-open="${r.employer_id}">${esc(r.employer || "")}</a>` : esc(r.employer || "—")}</td>
+      <td class="sm">${fmtShort(r.created_at)}<div class="sub">${r.reason === "Bounced" ? "Bounced" : r.source === "manual" ? "Added by you" : r.source === "reply" ? "Replied" : esc(r.reason || "")}</div></td>
+      <td class="sm">${r.detail ? `“${esc(r.detail)}”` : '<span class="sub">—</span>'}</td>
+      <td><button class="btn sm" data-unoptout="${r.id}" title="Allow emails to this address again">Remove</button></td></tr>`).join("")}</tbody></table>`
+    : `<div class="empty">${f.q ? "Nobody matches that search." : f.kind === "bounce" ? "No bounced addresses." : "Nobody has opted out yet."}</div>`}</section>`;
+}
+
 /* ---------------- client contacts ---------------- */
 const OUT_PILL = { "Not contacted": "p-mute", "In sequence": "p-info", "Emailed": "p-info", "Interested": "p-good", "Replied": "p-good", "Not right now": "p-warn", "Do not contact": "p-bad", "Current client": "p-warn" };
 function contactQuery() {
@@ -685,11 +704,11 @@ async function renderAll() {
     ui.overview = await api("/api/overview");
     await renderNav();
     const v = view();
-    const html = await ({ today: renderToday, queue: renderQueue, outreach: renderOutreach, responses: renderResponses, contacts: renderContacts, performance: renderPerformance, settings: renderSettings })[v]();
+    const html = await ({ today: renderToday, queue: renderQueue, outreach: renderOutreach, responses: renderResponses, optouts: renderOptouts, contacts: renderContacts, performance: renderPerformance, settings: renderSettings })[v]();
     const m = document.getElementById("main");
     const focusId = document.activeElement?.id; const pos = document.activeElement?.selectionStart;
     m.innerHTML = html;
-    if (focusId === "qsearch" || focusId === "cq") { const el = document.getElementById(focusId); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch {} } }
+    if (focusId === "qsearch" || focusId === "cq" || focusId === "ooq") { const el = document.getElementById(focusId); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch {} } }
     if (v === "settings") { await fillBookmarklet(); previewTemplate(); }
     await renderDrawer();
   } catch (e) { toast(e.message, true); }
@@ -758,6 +777,7 @@ document.addEventListener("click", async (ev) => {
       case "pollReplies": return act(api("/api/jobs/replies", { method: "POST", body: {} }).then((r) => ({ message: r.summary.reason || `${r.summary.checked} inbox messages checked, ${r.summary.matched} replies matched` })));
       case "bulk": return act(api("/api/queue/bulk", { method: "POST", body: { action: a.dataset.v } }));
       case "delBrochure": return act(api("/api/brochure", { method: "DELETE", body: {} }));
+      case "addOptout": return act(api("/api/optouts", { method: "POST", body: { email: document.getElementById("oo-email").value, note: document.getElementById("oo-note").value } }));
       case "addContactDb": {
         const v = (id) => document.getElementById(id)?.value || "";
         return act(api("/api/contacts", { method: "POST", body: { name: v("nc-name"), title: v("nc-title"), email: v("nc-email"), phone: v("nc-phone"), company: v("nc-company"), website: v("nc-web"), city: v("nc-city"), state: v("nc-state"), notes: v("nc-notes"), outreach: document.getElementById("nc-out")?.checked } }));
@@ -799,6 +819,8 @@ document.addEventListener("click", async (ev) => {
       }
     }
   }
+  const ok = t.closest("[data-ookind]"); if (ok) { ui.oo = { ...(ui.oo || { q: "" }), kind: ok.dataset.ookind }; return renderAll(); }
+  const uo = t.closest("[data-unoptout]"); if (uo) { if (!confirm("Allow emails to this address again?")) return; return act(api(`/api/optouts/${uo.dataset.unoptout}`, { method: "DELETE", body: {} })); }
   const el = t.closest("[data-elog]"); if (el) { ui.elog = { filter: el.dataset.elog, page: 0 }; return renderAll(); }
   const ep = t.closest("[data-elpage]"); if (ep && !ep.disabled) { ui.elog = { ...(ui.elog || { filter: "all" }), page: Number(ep.dataset.elpage) }; return renderAll(); }
   const cp = t.closest("[data-cpage]"); if (cp && !cp.disabled) { ui.cpage = Number(cp.dataset.cpage); await renderAll(); return window.scrollTo(0, 0); }
@@ -856,6 +878,7 @@ document.addEventListener("change", async (ev) => {
 });
 document.addEventListener("input", (ev) => {
   if (ev.target.id === "qsearch") { clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
+  if (ev.target.id === "ooq") { ui.oo = { ...(ui.oo || { kind: "opt" }), q: ev.target.value }; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
   if (ev.target.id === "cq") { ui.cf.q = ev.target.value; ui.cpage = 0; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
   if (ev.target.id === "tpl-body" || ev.target.id === "tpl-subject") { clearTimeout(previewTimer); previewTimer = setTimeout(previewTemplate, 400); }
 });

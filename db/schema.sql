@@ -255,3 +255,10 @@ CREATE TABLE IF NOT EXISTS lusha_balance (
 );
 ALTER TABLE employers ADD COLUMN IF NOT EXISTS drafts jsonb NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE sequences ADD COLUMN IF NOT EXISTS priority int NOT NULL DEFAULT 0;
+ALTER TABLE suppressions ADD COLUMN IF NOT EXISTS contact_name text;
+ALTER TABLE suppressions ADD COLUMN IF NOT EXISTS employer_id int;
+ALTER TABLE suppressions ADD COLUMN IF NOT EXISTS employer_name text;
+ALTER TABLE suppressions ADD COLUMN IF NOT EXISTS detail text;
+ALTER TABLE suppressions ADD COLUMN IF NOT EXISTS source text;
+-- Opt-outs need no action from the owner
+UPDATE replies SET handled = true WHERE category = 'opt_out' AND NOT handled;
