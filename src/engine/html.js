@@ -4,8 +4,8 @@
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const FONT = "font-family:Aptos,Calibri,Arial,Helvetica,sans-serif;font-size:12pt;line-height:1.45;color:#1f2328";
-const P = 'margin:0 0 14px 0';
-const QUIET = 'color:#6b7280;font-size:10.5pt';
+const P = `margin:0 0 14px 0;${FONT}`;
+const QUIET = 'color:#6b7280;font-size:10.5pt;font-family:Aptos,Calibri,Arial,Helvetica,sans-serif';
 const BULLET_RE = /^\s*[-•*]\s+/;
 const URL_RE = /\bhttps?:\/\/[^\s<>()]+[^\s<>().,;:!?'"]/g;
 
@@ -21,7 +21,7 @@ function linkify(text, labels) {
 function bulletItem(line, labels) {
   const text = line.replace(BULLET_RE, '');
   const m = text.match(/^(.{2,70}?)\s+[–—-]\s+(.+)$/); // "Lead-in – description" → bold lead-in
-  const B = 'margin:0 0 6px 0;padding:0 0 0 14px;text-indent:-14px';
+  const B = `margin:0 0 6px 0;padding:0 0 0 14px;text-indent:-14px;${FONT}`;
   return m ? `<p style="${B}">•&nbsp;&nbsp;<strong>${linkify(m[1], labels)}</strong> – ${linkify(m[2], labels)}</p>` : `<p style="${B}">•&nbsp;&nbsp;${linkify(text, labels)}</p>`;
 }
 
