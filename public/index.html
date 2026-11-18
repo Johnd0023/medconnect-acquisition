@@ -318,17 +318,46 @@ async function renderQueue() {
 }
 
 /* ---------------- outreach ---------------- */
+const STEP_NAME = (n) => (Number(n) === 0 ? "Initial email" : "Follow-up " + n);
+function groupByEmployer(rows) {
+  const m = new Map();
+  for (const x of rows) { if (!m.has(x.employer_id)) m.set(x.employer_id, { ...x, people: [] }); m.get(x.employer_id).people.push(x); }
+  return [...m.values()];
+}
+function stepList(rows, kind, key) {
+  const g = groupByEmployer(rows); const lim = ui.olim?.[key] || 25;
+  if (!g.length) return `<div class="empty">${kind === "due" ? "Nothing due at this step right now." : "Nothing scheduled at this step."}</div>`;
+  return `<div class="tablewrap"><table class="ctable"><colgroup><col style="width:34%"><col><col style="width:150px"></colgroup><tbody>${g.slice(0, lim).map((x) => `<tr class="click" data-open="${x.employer_id}">
+    <td><b>${esc(x.name)}</b>${x.people.some((p) => p.priority > 0) ? ' <span class="pill p-warn">⚡ First</span>' : ""}${x.people.length > 1 ? `<div class="sub">${x.people.length} contacts</div>` : ""}</td>
+    <td class="sm">${x.people.map((p) => `<span title="${esc(p.email || "")}">${esc(p.full_name || p.email || "")}</span>`).join(" · ")}</td>
+    <td class="n sm">${kind === "due" ? `<span class="sub">Due since</span><br>${fmtTime(x.next_at)}` : fmtTime(x.next_at)}</td></tr>`).join("")}</tbody></table></div>
+    ${g.length > lim ? `<div class="cb" style="text-align:center"><button class="btn sm" data-omore="${key}">Show ${Math.min(25, g.length - lim)} more of ${g.length - lim}</button></div>` : ""}`;
+}
 async function renderOutreach() {
   const d = await api("/api/outreach");
   const s = d.send;
-  return modeBanner(ui.overview?.mode) + `<div class="head"><div><h1>Outreach Activity</h1><p>Three emails per sequence. Follow-ups reply in the same Outlook thread. A reply, opt-out, bounce or protection match stops the sequence before the next send.</p></div>
+  const steps = [...new Set([0, 1, 2, ...d.counts.map((c) => Number(c.step))])].sort((a, b) => a - b);
+  const cnt = (st) => d.counts.find((c) => Number(c.step) === st) || { due: 0, scheduled: 0 };
+  const sent = (st) => (d.sentBy.find((c) => Number(c.step) === st) || { n: 0 }).n;
+  if (ui.ostep === undefined) ui.ostep = [...steps].reverse().find((st) => cnt(st).due > 0) ?? 0;
+  const tab = ui.ostep;
+  const tiles = steps.map((st) => { const c = cnt(st); return `<button class="kpi" data-ostep="${st}" aria-pressed="${tab === st}" style="text-align:left;cursor:pointer;font:inherit;${tab === st ? "outline:2px solid var(--accent);" : ""}">
+      <span class="l">${STEP_NAME(st)}${st > 0 ? " · sent first" : ""}</span><span class="v">${c.due + c.scheduled}</span><span class="s"><b>${c.due}</b> due now · ${c.scheduled} scheduled · ${sent(st)} sent</span></button>`; }).join("")
+    + `<button class="kpi" data-ostep="stopped" aria-pressed="${tab === "stopped"}" style="text-align:left;cursor:pointer;font:inherit;${tab === "stopped" ? "outline:2px solid var(--accent);" : ""}"><span class="l">Stopped or finished</span><span class="v">${d.stoppedTotal}</span><span class="s">Replied, opted out, bounced or done</span></button>`
+    + `<button class="kpi" data-ostep="log" aria-pressed="${tab === "log"}" style="text-align:left;cursor:pointer;font:inherit;${tab === "log" ? "outline:2px solid var(--accent);" : ""}"><span class="l">Sent log</span><span class="v">${s.sent}</span><span class="s">sent today · latest ${d.log.length} listed</span></button>`;
+  let body;
+  if (tab === "stopped") body = `<section class="card"><div class="ch"><h2>Stopped, paused and finished</h2><span class="sub">${d.stoppedTotal}</span></div>${d.stopped.length ? `<div class="tablewrap"><table><tbody>${d.stopped.slice(0, ui.olim?.stopped || 25).map((x) => `<tr class="click" data-open="${x.employer_id}"><td><b>${esc(x.name)}</b><div class="sub">${esc(x.stop_reason || "")}</div></td><td class="sm">Reached ${STEP_NAME(x.step)}</td><td><span class="pill ${x.status === "paused" ? "p-warn" : "p-mute"}">${esc(x.status)}</span></td></tr>`).join("")}</tbody></table></div>${d.stopped.length > (ui.olim?.stopped || 25) ? `<div class="cb" style="text-align:center"><button class="btn sm" data-omore="stopped">Show more</button></div>` : ""}` : '<div class="empty">None yet.</div>'}</section>`;
+  else if (tab === "log") body = `<section class="card"><div class="ch"><h2>Sent log</h2><span class="sub">Latest ${d.log.length}</span></div>${d.log.length ? `<div class="tablewrap"><table><thead><tr><th>When</th><th>Employer</th><th>Step</th><th>To</th><th>Subject</th><th></th></tr></thead><tbody>${d.log.slice(0, ui.olim?.log || 25).map((m) => `<tr class="click" data-open="${m.employer_id}"><td class="n">${fmtTime(m.sent_at)}</td><td>${esc(m.name)}</td><td class="sm">${STEP_NAME(m.step)}</td><td class="mono">${esc(m.to_email)}</td><td>${esc(m.subject)}</td><td>${m.status === "sent" ? '<span class="pill p-good">Sent</span>' + (m.clicked ? ' <span class="pill p-good">Clicked</span>' : m.opened ? ' <span class="pill p-info">Opened</span>' : "") : m.status === "dry_run" ? '<span class="pill p-warn">Dry run</span>' : `<span class="pill p-bad" title="${esc(m.error)}">Failed</span>`}</td></tr>`).join("")}</tbody></table></div>${d.log.length > (ui.olim?.log || 25) ? `<div class="cb" style="text-align:center"><button class="btn sm" data-omore="log">Show more</button></div>` : ""}` : '<div class="empty">Nothing sent yet.</div>'}</section>`;
+  else {
+    const due = d.due.filter((x) => Number(x.step) === tab), up = d.upcoming.filter((x) => Number(x.step) === tab), c = cnt(tab);
+    const orgs = (rows) => { const n = new Set(rows.map((x) => x.employer_id)).size; return `${n} client${n === 1 ? "" : "s"}`; };
+    body = `<div class="grid2"><section class="card"><div class="ch"><h2>${STEP_NAME(tab)} · due now · ${c.due} people</h2><span class="sub">${orgs(due)}</span></div>${stepList(due, "due", "due" + tab)}</section>
+      <section class="card"><div class="ch"><h2>${STEP_NAME(tab)} · scheduled · ${c.scheduled} people</h2><span class="sub">${orgs(up)}</span></div>${stepList(up, "up", "up" + tab)}</section></div>`;
+  }
+  return modeBanner(ui.overview?.mode) + `<div class="head"><div><h1>Outreach Activity</h1><p>Three emails per sequence. Follow-ups reply in the same Outlook thread. A reply, opt-out, bounce or protection match stops the sequence before the next send. Pick a step below to see who's in it.</p></div>
   <div class="actions"><span class="sub">${s.sent} / ${s.cap} ${s.dryRun ? "practice emails today (dry run: nothing is sent)" : "sent today"} · ${s.canSend ? "sending open" : esc(s.reason)}</span><button class="btn primary" data-act="sendNow" ${d.due.length && s.canSend ? "" : "disabled"}>Send next email now</button></div></div>
-  <section class="card"><div class="ch"><h2>Due now · ${d.due.length}</h2><span class="sub">Sent one at a time, spaced ${ui.settingsData ? ui.settingsData.settings.minGapSeconds + "–" + ui.settingsData.settings.maxGapSeconds + " seconds" : "randomly"}, inside the send window</span></div>${d.due.length ? `<div class="tablewrap"><table><thead><tr><th>Employer</th><th>To</th><th>Step</th></tr></thead><tbody>${d.due.map((x) => `<tr class="click" data-open="${x.employer_id}"><td><b>${esc(x.name)}</b></td><td>${esc(x.full_name)}<div class="sub mono">${esc(x.email)}</div></td><td>${x.step === 0 ? "Initial" : "Follow-up " + x.step}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Nothing due right now.</div>'}</section>
-  <div class="grid2">
-  <section class="card"><div class="ch"><h2>Scheduled</h2><span class="sub">${d.upcoming.length}</span></div>${d.upcoming.length ? `<div class="tablewrap"><table><tbody>${d.upcoming.map((x) => `<tr class="click" data-open="${x.employer_id}"><td><b>${esc(x.name)}</b><div class="sub">${esc(x.full_name)}</div></td><td>${x.step === 0 ? "Initial" : "Follow-up " + x.step}</td><td class="n">${fmtTime(x.next_at)}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">No future sends scheduled.</div>'}</section>
-  <section class="card"><div class="ch"><h2>Stopped, paused and finished</h2><span class="sub">${d.stopped.length}</span></div>${d.stopped.length ? `<div class="tablewrap"><table><tbody>${d.stopped.map((x) => `<tr class="click" data-open="${x.employer_id}"><td><b>${esc(x.name)}</b><div class="sub">${esc(x.stop_reason || "")}</div></td><td><span class="pill ${x.status === "paused" ? "p-warn" : "p-mute"}">${esc(x.status)}</span></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">None yet.</div>'}</section>
-  </div>
-  <section class="card"><div class="ch"><h2>Sent log</h2><span class="sub">Latest ${d.log.length}</span></div>${d.log.length ? `<div class="tablewrap"><table><thead><tr><th>When</th><th>Employer</th><th>To</th><th>Subject</th><th></th></tr></thead><tbody>${d.log.map((m) => `<tr class="click" data-open="${m.employer_id}"><td class="n">${fmtTime(m.sent_at)}</td><td>${esc(m.name)}</td><td class="mono">${esc(m.to_email)}</td><td>${esc(m.subject)}</td><td>${m.status === "sent" ? '<span class="pill p-good">Sent</span>' + (m.clicked ? ' <span class="pill p-good">Clicked</span>' : m.opened ? ' <span class="pill p-info">Opened</span>' : "") : m.status === "dry_run" ? '<span class="pill p-warn">Dry run</span>' : `<span class="pill p-bad" title="${esc(m.error)}">Failed</span>`}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Nothing sent yet.</div>'}</section>`;
+  <div class="kpis" role="group" aria-label="Sequence steps">${tiles}</div>
+  ${body}`;
 }
 
 /* ---------------- responses ---------------- */
@@ -819,6 +848,8 @@ document.addEventListener("click", async (ev) => {
       }
     }
   }
+  const os = t.closest("[data-ostep]"); if (os) { const v = os.dataset.ostep; ui.ostep = /^\d+$/.test(v) ? Number(v) : v; return renderAll(); }
+  const om = t.closest("[data-omore]"); if (om) { ui.olim = { ...(ui.olim || {}) }; ui.olim[om.dataset.omore] = (ui.olim[om.dataset.omore] || 25) + 25; return renderAll(); }
   const ok = t.closest("[data-ookind]"); if (ok) { ui.oo = { ...(ui.oo || { q: "" }), kind: ok.dataset.ookind }; return renderAll(); }
   const uo = t.closest("[data-unoptout]"); if (uo) { if (!confirm("Allow emails to this address again?")) return; return act(api(`/api/optouts/${uo.dataset.unoptout}`, { method: "DELETE", body: {} })); }
   const el = t.closest("[data-elog]"); if (el) { ui.elog = { filter: el.dataset.elog, page: 0 }; return renderAll(); }

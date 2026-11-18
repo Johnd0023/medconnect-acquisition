@@ -269,12 +269,16 @@ export const routes = {
   'GET /api/outreach': async () => {
     const st = await sendState();
     const due = await q(`SELECT s.*, e.name, c.full_name, c.email FROM sequences s JOIN employers e ON e.id = s.employer_id JOIN contacts c ON c.id = s.contact_id
-                         WHERE s.status = 'active' AND s.next_at <= now() ORDER BY s.step DESC, s.next_at LIMIT 200`);
+                         WHERE s.status = 'active' AND s.next_at <= now() ORDER BY s.priority DESC, s.step DESC, s.next_at LIMIT 2000`);
     const upcoming = await q(`SELECT s.*, e.name, c.full_name FROM sequences s JOIN employers e ON e.id = s.employer_id JOIN contacts c ON c.id = s.contact_id
-                              WHERE s.status = 'active' AND s.next_at > now() ORDER BY s.next_at LIMIT 200`);
-    const stopped = await q(`SELECT s.*, e.name FROM sequences s JOIN employers e ON e.id = s.employer_id WHERE s.status <> 'active' ORDER BY s.started_at DESC LIMIT 100`);
+                              WHERE s.status = 'active' AND s.next_at > now() ORDER BY s.next_at LIMIT 2000`);
+    const stopped = await q(`SELECT s.*, e.name FROM sequences s JOIN employers e ON e.id = s.employer_id WHERE s.status <> 'active' ORDER BY s.started_at DESC LIMIT 500`);
+    const counts = await q(`SELECT step, count(*) FILTER (WHERE status = 'active' AND next_at <= now())::int AS due, count(*) FILTER (WHERE status = 'active' AND next_at > now())::int AS scheduled
+                            FROM sequences GROUP BY step ORDER BY step`);
+    const sentBy = await q(`SELECT step, count(*)::int AS n FROM messages WHERE status = 'sent' GROUP BY step`);
+    const stoppedTotal = (await one(`SELECT count(*)::int AS n FROM sequences WHERE status <> 'active'`)).n;
     const log = await q(`SELECT m.id, m.employer_id, e.name, m.to_email, m.subject, m.status, m.error, m.step, m.sent_at, EXISTS (SELECT 1 FROM email_events x WHERE x.message_id = m.id AND x.kind = 'open' AND NOT x.machine) AS opened, EXISTS (SELECT 1 FROM email_events x WHERE x.message_id = m.id AND x.kind = 'click' AND NOT x.machine) AS clicked FROM messages m JOIN employers e ON e.id = m.employer_id ORDER BY m.sent_at DESC LIMIT 100`);
-    return { send: { ...st, settings: undefined }, due, upcoming, stopped, log };
+    return { send: { ...st, settings: undefined }, due, upcoming, stopped, log, counts, sentBy, stoppedTotal };
   },
 
   'POST /api/send/now': async () => sendTick({ force: true }),
