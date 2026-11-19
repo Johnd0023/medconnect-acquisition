@@ -160,12 +160,15 @@ export async function sendTick({ force = false } = {}) {
     return { sent: false, reason: r.status === 'protected' ? 'Blocked: protected client' : 'stopped' };
   }
   const contact = r.contacts.find((c) => c.id === seq.contact_id);
+  if (contact && isRelay(contact.email)) {
+    await stopSequenceById(seq.id, 'PracticeMatch address (@practicematch.com): never emailed'); await requalify(emp.id); return { sent: false, reason: 'stopped' };
+  }
   if (!contact || !contact.email || contact.bad || ctx.suppressedEmails.has(contact.email.toLowerCase())) {
     await stopSequenceById(seq.id, 'Contact opted out, bounced, or was marked wrong'); return { sent: false, reason: 'stopped' };
   }
   // "Together" sequences also go to the other selected contacts (minus anyone who opted out or bounced since)
   const others = (seq.cc_contact_ids || []).map((id) => r.contacts.find((c) => c.id === id))
-    .filter((c) => c && c.email && !c.bad && !ctx.suppressedEmails.has(c.email.toLowerCase()));
+    .filter((c) => c && c.email && !c.bad && !isRelay(c.email) && !ctx.suppressedEmails.has(c.email.toLowerCase()));
   const recipients = [contact, ...others];
   // FINAL GUARDRAIL: never email a protected client, whatever the source (PracticeMatch, Lusha, import, manual).
   // Uses a freshly loaded protected list and every posting behind this contact.

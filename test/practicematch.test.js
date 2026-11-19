@@ -102,7 +102,9 @@ test('PracticeMatch scan, consolidation and one sequence per contact', async () 
   // Approve + enroll everything
   await routes['POST /api/queue/bulk']({ body: { action: 'approveClean' } });
   const en = await routes['POST /api/queue/bulk']({ body: { action: 'enrollReady' } });
-  assert.match(en.message, /^6 enrolled/, 'Maury, Sky Lakes, Health First, ThedaCare, WVU, Terrell each once');
+  assert.match(en.message, /^3 enrolled/, 'Health First, ThedaCare, WVU; PracticeMatch addresses are never emailed');
+  const maurySt = await one(`SELECT status FROM employers WHERE name = 'Maury Regional Medical Group'`);
+  assert.equal(maurySt.status, 'needs_contact', 'a client with only a @practicematch.com address needs a real contact');
 
   // A second ThedaCare record with the same recruiter cannot start another sequence
   const extra = await one(`INSERT INTO employers (name, norm_name, type, sources, decision) VALUES ('ThedaCare Extra', 'thedacare extra', 'Urgent care / outpatient', ARRAY['PM'], 'approved') RETURNING id`);
@@ -114,13 +116,8 @@ test('PracticeMatch scan, consolidation and one sequence per contact', async () 
   await q(`INSERT INTO oauth_tokens (provider, account_email, refresh_token_enc, access_token_enc, expires_at) VALUES ('microsoft','bizdev@medconnectstaffing.com',$1,$2, now() + interval '1 hour')`, [encrypt('RT1'), encrypt('AT')]);
   for (let i = 0; i < 8; i++) await sendTick({ force: true });
   const sent = await q(`SELECT to_email, subject, body FROM messages WHERE status = 'sent' ORDER BY id`);
-  assert.equal(sent.length, 6);
-  const maury = sent.find((m) => /Maury/.test(m.subject) || m.body.includes('Maury'));
-  assert.match(maury.subject, /^Opportunity 1176353MS \| /, 'forwarding address keeps the Opportunity code');
-  assert.match(maury.body, /^Hi there,/, 'no name on a forwarding address');
-  const skyMsg = sent.filter((m) => m.to_email === 'mnstelmat@practicematch.com' && m.body.includes('Sky Lakes'));
-  assert.equal(skyMsg.length, 1, 'one email for Sky Lakes despite two openings');
-  assert.match(skyMsg[0].subject, /^Opportunity 117607[04]MS \| /);
+  assert.equal(sent.length, 3);
+  assert.equal(sent.filter((m) => /@practicematch\.com/i.test(m.to_email)).length, 0, 'nothing sent to PracticeMatch');
   const hf = sent.find((m) => m.to_email === 'robert.ferreri@hf.org');
   assert.doesNotMatch(hf.subject, /^Opportunity/, 'direct recruiter gets a normal subject');
   assert.match(hf.body, /^Hi Robert,/);
@@ -147,7 +144,11 @@ test('protected-client guardrail blocks every route right before sending', async
   const fine = await mk('Unrelated Hospital', 'unrelated.org', 'pat@unrelated.org', null, 'Pat');
   const { requalifyAll } = await import('../src/engine/qualify.js');
   await requalifyAll();
-  for (const e of [relay, sibling, lusha, fine]) await enroll(e.id);
+  await assert.rejects(() => enroll(relay.id), /Not ready/, 'a @practicematch.com-only client cannot be enrolled');
+  // Even if one slipped into a sequence, the send step refuses it
+  const rc = await one('SELECT id FROM contacts WHERE employer_id = $1', [relay.id]);
+  await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status) VALUES ($1,$2,0, now(),'active')`, [relay.id, rc.id]);
+  for (const e of [sibling, lusha, fine]) await enroll(e.id);
 
   // Clients added to the protected list AFTER outreach was queued
   await q(`INSERT INTO protected_accounts (name, norm_name, domain) VALUES ('Riverbend Health System','riverbend health system','riverbendhealth.org'), ('Coastal Medical Center','coastal medical center', null)`);
@@ -155,7 +156,8 @@ test('protected-client guardrail blocks every route right before sending', async
   for (let i = 0; i < 6; i++) await sendTick({ force: true });
   const sent = await q(`SELECT to_email FROM messages WHERE status = 'sent'`);
   assert.deepEqual(sent.map((m) => m.to_email), ['pat@unrelated.org'], 'only the unprotected prospect is emailed');
-  for (const e of [relay, sibling, lusha]) {
+  assert.equal((await one(`SELECT status FROM sequences WHERE employer_id = $1`, [relay.id])).status, 'stopped');
+  for (const e of [sibling, lusha]) {
     const ev = await one(`SELECT text FROM events WHERE employer_id = $1 AND text LIKE '%BLOCKED%'`, [e.id]);
     assert.ok(ev, `blocked event recorded for ${e.name}`);
   }

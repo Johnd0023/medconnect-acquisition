@@ -540,7 +540,7 @@ async function renderSettings() {
     ${sw("s-pmpo", "practicematch.providersOnly", s.practicematch?.providersOnly === true, "Physicians and APPs only", "Off: every role at healthcare facilities (RN, techs, therapists…). On: only physician, NP, PA, CRNA and midwife jobs.")}
     ${sw("s-pmih", "practicematch.inHouseOnly", s.practicematch?.inHouseOnly !== false, "In-house postings only", "Skip jobs posted by staffing agencies.")}
     <div class="field"><label for="s-pmt">Scan times</label><textarea id="s-pmt" data-path="practicematch.scanTimes" data-kind="list" style="min-height:70px">${esc((s.practicematch?.scanTimes || []).join("\n"))}</textarea><span class="hint">One per line, ${esc(I.timezone)}. The first runs with the morning discovery.</span></div>
-    ${sw("s-pmr", "practicematch.relayOutreach", s.practicematch?.relayOutreach !== false, "Email PracticeMatch forwarding addresses", "Send outreach to the posting's Click-to-email address (with your written PracticeMatch permission). Subject keeps the Opportunity code.")}
+
     ${num("s-pmd", "practicematch.delayMs", s.practicematch?.delayMs ?? 1500, "Pause between page requests (ms)", "Keeps the scan gentle on PracticeMatch.", 800, 10000)}
   </div></section>
 

@@ -199,6 +199,8 @@ const server = http.createServer(async (req, res) => {
 
 await migrate();
 await fillNamesFromEmail().then((n) => n && console.log(`Filled in ${n} contact names from email addresses`)).catch((e) => console.error('Name fill failed:', e.message));
+// Re-sort every client once on boot so rule changes (e.g. no @practicematch.com emails) take effect right away
+import('./engine/qualify.js').then((m) => m.requalifyAll()).catch((e) => console.error('Requalify on boot failed:', e.message));
 server.listen(cfg.port, () => {
   console.log(`MedConnect platform listening on ${cfg.appUrl} (port ${cfg.port})`);
   startScheduler();

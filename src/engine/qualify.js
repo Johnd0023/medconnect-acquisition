@@ -100,7 +100,7 @@ export function titleRank(title, ctx, departments = []) {
 
 export function isUsable(c, ctx) {
   if (!c.email || c.bad) return false;
-  if (/@practicematch\.com$/i.test(c.email) && ctx.settings.practicematch?.relayOutreach === false) return false;
+  if (isRelayAddr(c.email)) return false; // never email PracticeMatch addresses (@practicematch.com)
   if (ctx.suppressedEmails.has(c.email.toLowerCase()) || ctx.suppressedDomains.has(emailDomain(c.email))) return false;
   // A contact published on the listing is the listing's own recruiter, so it is usable even with a vague title.
   return titleRank(c.title, ctx) < 99 || c.sources.includes('PM') || c.sources.includes('Referral');

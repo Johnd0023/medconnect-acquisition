@@ -267,3 +267,9 @@ UPDATE sequences s SET status = 'active', stop_reason = NULL,
   next_at = GREATEST(now(), COALESCE((SELECT max(r.received_at) FROM replies r WHERE r.employer_id = s.employer_id AND r.category = 'ooo'), now()) + interval '7 days')
 WHERE s.status = 'paused' AND s.stop_reason LIKE 'Out-of-office%';
 UPDATE replies SET handled = true WHERE category = 'ooo' AND NOT handled;
+-- Never email @practicematch.com addresses: stop any sequence addressed to one, drop them from shared emails
+UPDATE sequences s SET status = 'stopped', stop_reason = 'PracticeMatch address (@practicematch.com): never emailed'
+WHERE s.status IN ('active','paused') AND EXISTS (SELECT 1 FROM contacts c WHERE c.id = s.contact_id AND c.email ILIKE '%@practicematch.com');
+UPDATE sequences s SET cc_contact_ids = ARRAY(SELECT x FROM unnest(s.cc_contact_ids) x WHERE NOT EXISTS (SELECT 1 FROM contacts c WHERE c.id = x AND c.email ILIKE '%@practicematch.com'))
+WHERE s.status IN ('active','paused') AND EXISTS (SELECT 1 FROM contacts c WHERE c.id = ANY(s.cc_contact_ids) AND c.email ILIKE '%@practicematch.com');
+UPDATE settings SET data = jsonb_set(data, '{practicematch,relayOutreach}', 'false') WHERE data ? 'practicematch';

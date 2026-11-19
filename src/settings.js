@@ -105,7 +105,7 @@ export const DEFAULT_SETTINGS = {
     maxPagesPerBoard: 60,
     maxDetailsPerRun: 1500,
     delayMs: 1500,              // pause between page requests
-    relayOutreach: true,        // email the posting's "Click to email" address (PracticeMatch forwarding addresses included)
+    relayOutreach: false,       // never email @practicematch.com addresses (always enforced in qualify/outreach)
   },
 
   // --- Lusha ---
