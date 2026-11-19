@@ -262,3 +262,8 @@ ALTER TABLE suppressions ADD COLUMN IF NOT EXISTS detail text;
 ALTER TABLE suppressions ADD COLUMN IF NOT EXISTS source text;
 -- Opt-outs need no action from the owner
 UPDATE replies SET handled = true WHERE category = 'opt_out' AND NOT handled;
+-- Out-of-office sequences resume on their own 7 days after the auto-reply
+UPDATE sequences s SET status = 'active', stop_reason = NULL,
+  next_at = GREATEST(now(), COALESCE((SELECT max(r.received_at) FROM replies r WHERE r.employer_id = s.employer_id AND r.category = 'ooo'), now()) + interval '7 days')
+WHERE s.status = 'paused' AND s.stop_reason LIKE 'Out-of-office%';
+UPDATE replies SET handled = true WHERE category = 'ooo' AND NOT handled;

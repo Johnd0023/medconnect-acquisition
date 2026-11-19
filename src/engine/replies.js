@@ -54,6 +54,21 @@ async function matchBounce(text) {
 /** Apply the effects of a categorized reply.
  *  Opt-out, bounce, wrong person: only that person's sequence stops. Any other human reply (interested,
  *  not now, referral…) stops every sequence at that client, so colleagues aren't followed up after someone answered. */
+const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+/** When to resume after an out-of-office: 7 days later, or the day after a stated return date (up to 30 days). */
+export function oooResumeAt(text = '', received = new Date()) {
+  const week = new Date(received.getTime() + 7 * 864e5);
+  const t = String(text).toLowerCase().split(/\n\s*(from:|-----original|on .+ wrote:)/)[0];
+  const m = t.match(/(?:return(?:ing)?|back(?: in the office)?|until|through|returning to the office)\s+(?:on\s+)?(?:\w+day,?\s+)?(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})|(\d{1,2})\/(\d{1,2}))/);
+  if (!m) return week;
+  const mon = m[1] ? MONTHS.indexOf(m[1]) : Number(m[3]) - 1, day = Number(m[2] || m[4]);
+  if (mon < 0 || mon > 11 || !day || day > 31) return week;
+  let back = new Date(Date.UTC(received.getUTCFullYear(), mon, day, 15));
+  if (back < received - 864e5) back = new Date(Date.UTC(received.getUTCFullYear() + 1, mon, day, 15));
+  const after = new Date(back.getTime() + 864e5);
+  return after > week && after - received <= 30 * 864e5 ? after : week;
+}
+
 export async function applyReply(reply, message) {
   const empId = message.employer_id;
   const replier = (reply.from_email && await one(`SELECT * FROM contacts WHERE employer_id = $1 AND lower(email) = $2`, [empId, reply.from_email.toLowerCase()]))
@@ -65,7 +80,12 @@ export async function applyReply(reply, message) {
   const personal = ['opt_out', 'bounce', 'wrong_contact'].includes(reply.category);
   const seqId = message.sequence_id;
   if (reply.category === 'ooo') {
-    if (seqId) await stopSequenceById(seqId, 'Out-of-office reply. Resume from the Response Queue.', 'paused');
+    // Hold the sequence and pick it back up automatically: 7 days out, or the day after they say they're back if later (max 30).
+    const at = oooResumeAt(`${reply.subject || ''}\n${reply.body_preview || ''}`, reply.received_at ? new Date(reply.received_at) : new Date());
+    const s = seqId && await one(`UPDATE sequences SET next_at = GREATEST(next_at, $2), status = 'active', stop_reason = NULL
+                                  WHERE id = $1 AND status IN ('active','paused') RETURNING id`, [seqId, at]);
+    if (s) await logEvent(empId, `Out of office: next email moved to ${at.toDateString()}`);
+    await q('UPDATE replies SET handled = true WHERE id = $1', [reply.id]); // nothing for the owner to do
   } else if (personal) {
     // Remove just this person: their own sequence stops; in a shared email they're dropped from the recipients.
     const seq = seqId && await one('SELECT * FROM sequences WHERE id = $1', [seqId]);
