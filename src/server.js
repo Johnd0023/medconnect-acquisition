@@ -198,6 +198,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 await migrate();
+await import('./engine/replies.js').then((m) => m.repairSenderBlockBounces()).then((n) => n && console.log(`Restored ${n} contacts wrongly marked bounced by a mailbox restriction`)).catch((e) => console.error('Repair failed:', e.message));
 await fillNamesFromEmail().then((n) => n && console.log(`Filled in ${n} contact names from email addresses`)).catch((e) => console.error('Name fill failed:', e.message));
 // Re-sort every client once on boot so rule changes (e.g. no @practicematch.com emails) take effect right away
 import('./engine/qualify.js').then((m) => m.requalifyAll()).catch((e) => console.error('Requalify on boot failed:', e.message));

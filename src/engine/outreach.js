@@ -100,6 +100,10 @@ export async function resumeSequence(employerId, at = new Date()) {
 
 /** Today's allowed volume after warm-up. */
 export async function todaysCap(settings) {
+  // For 7 days after Microsoft restricted the mailbox, send at half the usual cap
+  const cool = await kvGet('cooldown_until');
+  const base = cool && new Date(cool) > new Date() ? Math.max(5, Math.floor(settings.dailyCap / 2)) : settings.dailyCap;
+  settings = { ...settings, dailyCap: base };
   if (!settings.warmup?.enabled) return settings.dailyCap;
   const r = await one(`SELECT count(DISTINCT (sent_at AT TIME ZONE $1)::date) AS days FROM messages
                        WHERE status = 'sent' AND sent_at < $2`, [cfg.timezone, startOfBusinessDay()]);
@@ -129,6 +133,11 @@ export async function sendState(now = new Date()) {
   else if (!inDay) reason = 'Not a send day';
   else if (!inWindow) reason = `Outside the send window (${s.sendWindowStart}–${s.sendWindowEnd})`;
   else if (sent >= cap) reason = `Today's limit reached (${sent}/${cap})`;
+  else {
+    const hour = Number((await one(`SELECT count(*) AS n FROM messages WHERE status IN ('sent','dry_run') AND sent_at > now() - interval '60 minutes'`)).n);
+    const hc = s.hourlyCap ?? 10;
+    if (hour >= hc) reason = `Hourly limit reached (${hour}/${hc} in the last hour)`;
+  }
   return { canSend: !reason, reason, cap, sent, inWindow, dryRun: cfg.dryRun, nextAllowed: nextAllowed ? new Date(nextAllowed) : null, settings: s };
 }
 
@@ -213,7 +222,8 @@ async function deliver({ seq, emp, contact, recipients, m, attachments, s, ctx, 
     } catch (e) {
       error = e.message;
       if (e.status === 401 || e.status === 403 || e.code === 'NotConnected' || e.code === 'invalid_grant' || e.code === 'ErrorAccessDenied' || e.code === 'ErrorExceededMessageLimit' || e.code === 'ErrorSubmissionQuotaExceeded') {
-        await kvSet('send_blocked', { reason: error, at: new Date().toISOString() });
+        const restricted = /5\.1\.8|outbound sender|quota|limit/i.test(`${e.code} ${error}`);
+        await kvSet('send_blocked', { reason: restricted ? `Microsoft refused to send (${error}). Your mailbox may be restricted: check Microsoft Defender → Restricted entities, then resume.` : error, at: new Date().toISOString(), kind: restricted ? 'restricted' : 'error' });
         await q('UPDATE sequences SET claimed_at = NULL WHERE id = $1', [seq.id]);
         return { sent: false, reason: `Sending blocked: ${error}` };
       }
@@ -297,4 +307,8 @@ async function campaignSend(seq, s) {
   return r;
 }
 
-export async function clearSendBlock() { await kvSet('send_blocked', null); }
+export async function clearSendBlock() {
+  const b = await kvGet('send_blocked');
+  if (b?.kind === 'restricted') await kvSet('cooldown_until', new Date(Date.now() + 7 * 864e5).toISOString());
+  await kvSet('send_blocked', null);
+}

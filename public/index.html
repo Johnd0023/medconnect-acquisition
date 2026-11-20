@@ -248,6 +248,8 @@ function rowActions(e) {
 }
 function modeBanner(m) {
   if (!m) return "";
+  const r = ui.overview?.send?.reason || "";
+  if (/^Sending stopped/.test(r)) return `<div class="banner" style="background:var(--bad-soft)"><b style="color:var(--bad)">Sending stopped</b><span>${esc(r.replace(/^Sending stopped: /, ""))} <button class="btn sm" data-act="unblock">I fixed it, resume sending</button></span></div>`;
   if (m.dryRun) return '<div class="banner"><b>Dry run</b><span>Emails are composed and logged, never sent. When the supervised review looks right, set DRY_RUN=false in Railway to go live.</span></div>';
   if (m.paused) return '<div class="banner"><b>Paused</b><span>Automation is paused. Discovery keeps running; nothing is sent. Turn it back on in Settings.</span></div>';
   return "";
@@ -514,6 +516,7 @@ async function renderSettings() {
 
   <section class="card"><div class="ch"><h2>Sending limits</h2></div><div class="cb form">
     ${num("s-cap", "dailyCap", s.dailyCap, "Daily cap", "Hard ceiling on emails per day, follow-ups included.", 1, 500)}
+    ${num("s-hcap", "hourlyCap", s.hourlyCap ?? 10, "Hourly cap", "At most this many in any 60 minutes, so sending stays steady instead of bursting.", 1, 100)}
     ${sw("s-warm", "warmup.enabled", s.warmup.enabled, "Warm-up ramp", "Start low and add a few per send day until the daily cap.")}
     ${num("s-ws0", "warmup.startPerDay", s.warmup.startPerDay, "Warm-up: first day", "", 1, 500)}
     ${num("s-wsi", "warmup.increasePerDay", s.warmup.increasePerDay, "Warm-up: add per day", "", 0, 100)}
@@ -744,7 +747,7 @@ async function renderCampaign() {
   }
   return `<div class="head"><div><h1>${esc(camp.name)}</h1><p>Recruiters and hiring contacts at ${esc(camp.client)} and its entities. This runs separately from prospect outreach, where these clients stay protected. Nothing sends until you approve that email, and right before each one goes out, Outlook is searched again for any email with that person since you approved.</p></div>
     <div class="actions"><span class="sub">${d.sentToday} of ${camp.settings.dailyLimit} campaign emails today${d.dryRun ? " (dry run)" : ""}</span><span class="pill ${camp.active ? "p-good" : "p-bad"}">${camp.active ? "Active" : "Paused"}</span><button class="btn" data-cact="toggle">${camp.active ? "Pause campaign" : "Resume campaign"}</button><button class="btn" data-cact="checkAll" ${d.outlookConnected ? "" : "disabled"}>Check Outlook for everyone</button></div></div>
-    ${warn}
+    ${modeBanner(ui.overview?.mode)}${warn}
     <div class="kpis" role="group" aria-label="Campaign stages">${tiles}</div>
     ${d.optedOut || d.relayOnly ? `<div class="sub">Not listed: ${d.optedOut} opted out or bounced${d.relayOnly ? `, ${d.relayOnly} entities whose postings only have a PracticeMatch address (see No direct contact)` : ""}.</div>` : ""}
     ${body}`;

@@ -9,8 +9,12 @@ import { isRelay } from '../util.js';
 
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 
+/** Microsoft refusing to send from YOUR mailbox (restricted sender, tenant block, quota): not the recipient's fault. */
+export const SENDER_BLOCKED = /\b5\.1\.8\b|bad outbound sender|\b5\.7\.70[5-8]\b|restricted from sending|exceeded (your |the )?sending limit|submission quota|access denied,? (bad|banned) (outbound )?sender/i;
+
 export function classify(subject = '', text = '') {
   const s = `${subject}\n${text}`.toLowerCase();
+  if (/undeliverable|delivery has failed|couldn't be delivered|not delivered|delivery status notification|mail delivery/.test(s) && SENDER_BLOCKED.test(s)) return 'sender_blocked';
   if (/undeliverable|delivery has failed|delivery status notification|mail delivery (failed|subsystem)|couldn't be delivered|address not found|recipient address rejected/.test(s)) return 'bounce';
   if (/automatic reply|auto-?reply|out of (the )?office|on (annual |parental |medical )?leave|limited access to (my )?email|i am away|i'm away|currently away/.test(s)) return 'ooo';
   if (/unsubscribe|remove me|take me off|stop (emailing|contacting)|do not (email|contact)|opt(ed)? out|no further (emails|contact)/.test(s)) return 'opt_out';
@@ -167,6 +171,7 @@ export async function pollReplies() {
     if (fromEmail === own) continue;
     const text = msg.body?.content || msg.bodyPreview || '';
     let category = classify(msg.subject, text);
+    if (category === 'sender_blocked') { await handleSenderBlocked(msg, text); continue; }
     const message = category === 'bounce' ? await matchBounce(text) : await matchSentMessage(msg, fromEmail);
     if (!message) continue; // not related to our outreach
     if (category === 'other') { const ai = await classifyReply({ subject: msg.subject, text }); if (ai) category = ai.category; }
@@ -176,5 +181,65 @@ export async function pollReplies() {
     if (reply) { await applyReply(reply, message); matched++; }
   }
   await kvSet('reply_cursor', latest.toISOString());
+  await bounceGuard();
   return { checked: inbox.length, matched };
+}
+
+const RESTRICTED_MSG = 'Microsoft 365 restricted your mailbox from sending outside your organization (550 5.1.8). Nothing more will go out. Unblock it in Microsoft Defender (security.microsoft.com → Email & collaboration → Review → Restricted entities), then click "I fixed it, resume sending". Sending resumes at half your daily cap for 7 days.';
+
+/** Microsoft blocked the mailbox: stop everything, and put the email that didn't go out back in line. */
+async function handleSenderBlocked(msg, text) {
+  await kvSet('send_blocked', { reason: RESTRICTED_MSG, at: new Date().toISOString(), kind: 'restricted' });
+  await kvSet('cooldown_until', new Date(Date.now() + 7 * 864e5).toISOString());
+  const m = await matchBounce(text);
+  if (m) await requeueUndelivered(m, 'Not delivered: your mailbox was restricted by Microsoft');
+  await q(`INSERT INTO replies (employer_id, contact_id, message_id, graph_id, from_email, subject, body_preview, received_at, category, handled)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'sender_blocked', true) ON CONFLICT (graph_id) DO NOTHING`,
+  [m?.employer_id || null, m?.contact_id || null, m?.id || null, msg.id, (msg.from?.emailAddress?.address || '').toLowerCase(), msg.subject, String(text || '').slice(0, 2000), new Date(msg.receivedDateTime)]);
+}
+
+/** The email never reached them: mark it failed and send that step again later (no opt-out, no "bad contact"). */
+async function requeueUndelivered(m, why) {
+  await q(`UPDATE messages SET status = 'failed', error = $2 WHERE id = $1`, [m.id, why]);
+  if (m.sequence_id) {
+    await q(`UPDATE sequences SET status = 'active', step = $2, next_at = now() + interval '1 day', stop_reason = NULL, claimed_at = NULL,
+             approved_step = CASE WHEN campaign_id IS NOT NULL THEN GREATEST(approved_step, $2) ELSE approved_step END
+             WHERE id = $1 AND status IN ('active','stopped','completed','paused') AND NOT replied`, [m.sequence_id, m.step]);
+  }
+  if (m.employer_id) await logEvent(m.employer_id, `${why}. ${m.to_email} will get this email again once sending resumes.`);
+}
+
+/**
+ * Repair: NDRs from a mailbox restriction that were filed as ordinary bounces before this check existed.
+ * Takes those people off the opt-out list, un-marks them as bad, and puts their email back in line.
+ */
+export async function repairSenderBlockBounces() {
+  const rows = await q(`SELECT r.*, m.id AS mid FROM replies r LEFT JOIN messages m ON m.id = r.message_id WHERE r.category = 'bounce'`);
+  let fixed = 0;
+  for (const r of rows) {
+    if (!SENDER_BLOCKED.test(`${r.subject}\n${r.body_preview}`)) continue;
+    const c = r.contact_id ? await one('SELECT * FROM contacts WHERE id = $1', [r.contact_id]) : null;
+    if (c?.email) {
+      await q(`DELETE FROM suppressions WHERE kind = 'email' AND lower(value) = lower($1) AND reason = 'Bounced'`, [c.email]);
+      await q('UPDATE contacts SET bad = false WHERE lower(email) = lower($1)', [c.email]);
+    }
+    const m = r.mid ? await one('SELECT * FROM messages WHERE id = $1', [r.mid]) : null;
+    if (m) await requeueUndelivered(m, 'Not delivered: your mailbox was restricted by Microsoft');
+    await q(`UPDATE replies SET category = 'sender_blocked', handled = true WHERE id = $1`, [r.id]);
+    if (r.employer_id) await requalify(r.employer_id);
+    fixed++;
+  }
+  if (fixed) await kvSet('cooldown_until', new Date(Date.now() + 7 * 864e5).toISOString());
+  return fixed;
+}
+
+/** Stop sending early when bounces spike (a big trigger for Microsoft's outbound filters). */
+export async function bounceGuard() {
+  const r = await one(`SELECT (SELECT count(*) FROM replies WHERE category = 'bounce' AND received_at > now() - interval '24 hours')::int AS bounces,
+                              (SELECT count(*) FROM messages WHERE status = 'sent' AND sent_at > now() - interval '24 hours')::int AS sent`);
+  if (r.bounces >= 3 && r.bounces / Math.max(r.sent, 1) > 0.05 && !(await kvGet('send_blocked'))) {
+    await kvSet('send_blocked', { reason: `${r.bounces} of the last ${r.sent} emails bounced in 24 hours (over 5%). Microsoft treats high bounce rates as a sign of spam, so sending is paused. Check the Opt-outs → Bounced list for bad addresses, then resume.`, at: new Date().toISOString(), kind: 'bounces' });
+    return true;
+  }
+  return false;
 }

@@ -79,6 +79,7 @@ export const DEFAULT_SETTINGS = {
 
   // --- sending limits ---
   dailyCap: 40,                // hard ceiling per day
+  hourlyCap: 10,               // at most this many in any 60 minutes (steady pace, no bursts)
   warmup: { enabled: true, startPerDay: 10, increasePerDay: 5 },  // ramp toward dailyCap from the first send day
   minGapSeconds: 90,           // random spacing between sends
   maxGapSeconds: 240,
@@ -217,6 +218,7 @@ export async function saveSettings(patch) {
 function validate(s) {
   const int = (v, lo, hi, name) => { if (!Number.isInteger(v) || v < lo || v > hi) throw new Error(`${name} must be a whole number between ${lo} and ${hi}.`); };
   int(s.dailyCap, 1, 500, 'Daily cap');
+  int(s.hourlyCap ?? 10, 1, 100, 'Hourly cap');
   int(s.threshold, 0, 100, 'Auto-approve threshold');
   int(s.minGapSeconds, 0, 3600, 'Minimum gap');
   int(s.maxGapSeconds, s.minGapSeconds, 7200, 'Maximum gap');
