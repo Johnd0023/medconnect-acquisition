@@ -61,8 +61,13 @@ test('CommonSpirit campaign', async () => {
   b = await routes['GET /api/campaigns/:id']({ params: { id: 'commonspirit' } });
   assert.equal(b.counts.queued, 1); assert.equal(b.counts.skipped, 1); assert.equal(b.counts.review, 0);
 
+  // A regular prospect follow-up with "send first" is due too: the approved campaign email still goes first
+  const pat = await one(`SELECT c.id, c.employer_id FROM contacts c WHERE c.email = 'pat@mercy.net'`);
+  const reg = await one(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status, priority) VALUES ($1,$2,1, now() - interval '1 day','active', 1) RETURNING id`, [pat.employer_id, pat.id]);
   const r = await sendTick({ force: true });
   assert.equal(r.sent, true, JSON.stringify(r));
+  assert.equal(r.to, 'amy.lee@dignityhealth.org', 'campaign email first');
+  await q(`UPDATE sequences SET status = 'stopped' WHERE id = $1`, [reg.id]);
   const msg = await one(`SELECT * FROM messages WHERE to_email = 'amy.lee@dignityhealth.org'`);
   assert.match(msg.subject, /CommonSpirit Health MSA in place/);
   assert.equal((await one(`SELECT count(*)::int n FROM messages WHERE to_email = 'pat@mercy.net'`)).n, 0);
