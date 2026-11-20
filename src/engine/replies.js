@@ -102,6 +102,8 @@ export async function applyReply(reply, message) {
   } else {
     await q(`UPDATE sequences SET replied = true WHERE employer_id = $1 AND status IN ('active','paused')`, [empId]);
     await stopSequence(empId, `Prospect replied (${labels[reply.category]})`);
+    // The same person may be in other sequences (another entity, the CommonSpirit campaign, CC'd on a shared email): end those too
+    await stopEverywhereFor([reply.from_email, replier?.email, message._replier].filter(Boolean), `Replied (${labels[reply.category]}) on ${new Date(reply.received_at || Date.now()).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`);
   }
   const contact = replier;
   if (contact && (reply.category === 'opt_out' || reply.category === 'bounce')) {
@@ -155,6 +157,19 @@ export async function optOutEmail(email, { reason = 'Opted out', source = 'manua
   return { email: e, stopped };
 }
 
+/** End every running sequence that would email any of these addresses again (as the main recipient or CC'd). */
+export async function stopEverywhereFor(emails, reason) {
+  const list = [...new Set(emails.map((e) => String(e).toLowerCase()).filter((e) => e && !isRelay(e)))];
+  if (!list.length) return 0;
+  const rows = await q(`SELECT DISTINCT s.id FROM sequences s JOIN contacts c ON c.id = s.contact_id OR c.id = ANY(s.cc_contact_ids)
+                        WHERE s.status IN ('active','paused') AND lower(c.email) = ANY($1)`, [list]);
+  for (const r of rows) {
+    await q('UPDATE sequences SET replied = true WHERE id = $1', [r.id]);
+    await stopSequenceById(r.id, reason);
+  }
+  return rows.length;
+}
+
 export async function pollReplies() {
   const conn = await outlook.connection();
   if (!conn.connected) return { checked: 0, matched: 0, reason: 'Outlook not connected' };
@@ -181,6 +196,7 @@ export async function pollReplies() {
     if (reply) { await applyReply(reply, message); matched++; }
   }
   await kvSet('reply_cursor', latest.toISOString());
+  await kvSet('reply_polled_at', new Date().toISOString());
   await bounceGuard();
   return { checked: inbox.length, matched };
 }

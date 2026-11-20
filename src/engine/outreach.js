@@ -157,14 +157,37 @@ async function claimNext(settings) {
     RETURNING *`, [startOfBusinessDay(), settings.perEmployerPerDay]);
 }
 
+/** Has anyone this sequence emails written back (not an out-of-office) since it started? */
+async function repliedSince(seq) {
+  if (seq.replied) return true;
+  const r = await one(`SELECT 1 FROM replies r JOIN contacts c ON lower(c.email) = lower(r.from_email)
+                       WHERE (c.id = $1 OR c.id = ANY($2::int[])) AND r.received_at >= $3 AND r.category NOT IN ('ooo','bounce','sender_blocked') LIMIT 1`,
+  [seq.contact_id, seq.cc_contact_ids || [], seq.started_at]);
+  if (r) return true;
+  const t = await one(`SELECT 1 FROM replies r JOIN messages m ON m.id = r.message_id WHERE m.sequence_id = $1 AND r.category NOT IN ('ooo','bounce','sender_blocked') LIMIT 1`, [seq.id]);
+  return Boolean(t);
+}
+
 /** Send at most one email if every limit allows it. Returns a short description of what happened. */
 export async function sendTick({ force = false } = {}) {
   const st = await sendState();
   if (!st.canSend) return { sent: false, reason: st.reason };
   if (!force && st.nextAllowed && st.nextAllowed > new Date()) return { sent: false, reason: 'Waiting for spacing gap' };
   const s = st.settings;
+  // Read the inbox right before sending if it hasn't been checked in the last 3 minutes, so a fresh reply stops the next email
+  if (!cfg.dryRun) {
+    const last = await kvGet('reply_polled_at');
+    if (!last || Date.now() - new Date(last) > 3 * 60000) {
+      try { await (await import('./replies.js')).pollReplies(); } catch (e) { console.error('Reply check before send failed:', e.message); }
+    }
+  }
   const seq = await claimNext(s);
   if (!seq) return { sent: false, reason: 'Nothing due' };
+  if (await repliedSince(seq)) {
+    await q('UPDATE sequences SET replied = true WHERE id = $1', [seq.id]);
+    await stopSequenceById(seq.id, 'Replied: no more emails in this sequence');
+    return { sent: false, reason: 'stopped (they replied)' };
+  }
   if (seq.campaign_id) return campaignSend(seq, s);
 
   const ctx = await loadContext();
@@ -296,6 +319,11 @@ async function campaignSend(seq, s) {
       const { messages } = await checkOutlook(camp.id, email);
       const since = new Date(seq.approved_at || seq.started_at);
       const fresh = messages.filter((x) => new Date(x.at) > since);
+      const fromThem = fresh.filter((x) => x.from === email && !/^(automatic reply|auto(matic)?[- ]?reply|out of (the )?office)/i.test(x.subject || ''));
+      if (fromThem.length) {
+        await q('UPDATE sequences SET replied = true WHERE id = $1', [seq.id]);
+        return stop(`Replied ${new Date(fromThem[0].at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: "${(fromThem[0].subject || '').slice(0, 80)}". No more campaign emails.`);
+      }
       if (fresh.length) hold = `New Outlook email with ${email} since you approved this (${new Date(fresh[0].at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: "${(fresh[0].subject || '').slice(0, 80)}"). Check it, then approve again.`;
     } catch (e) { hold = `Couldn't check Outlook for earlier emails (${e.message}). Approve again to retry.`; }
     if (hold) {

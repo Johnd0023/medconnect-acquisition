@@ -303,10 +303,10 @@ export async function checkOutlook(campaignId, email) {
   const conn = await outlook.connection();
   if (!conn.connected) throw new Error('Outlook is not connected');
   const msgs = await outlook.historyWith(email);
-  const ours = new Set((await q(`SELECT internet_message_id, conversation_id FROM messages WHERE status = 'sent' AND (internet_message_id IS NOT NULL OR conversation_id IS NOT NULL)`))
-    .flatMap((m) => [m.internet_message_id, m.conversation_id]).filter(Boolean));
+  // Only the emails this app itself sent are left out; a reply in the same thread still counts as history
+  const ours = new Set((await q(`SELECT internet_message_id FROM messages WHERE status = 'sent' AND internet_message_id IS NOT NULL`)).map((m) => m.internet_message_id));
   const own = (conn.email || '').toLowerCase();
-  const theirs = msgs.filter((m) => !ours.has(m.internetMessageId) && !ours.has(m.conversationId));
+  const theirs = msgs.filter((m) => !ours.has(m.internetMessageId));
   const last = theirs[0];
   const summary = {
     total: theirs.length, fromApp: msgs.length - theirs.length,

@@ -110,7 +110,7 @@ test('CommonSpirit campaign', async () => {
   const e3 = await mk('CHI St. Vincent Infirmary', 'chistvincent.com', 'kim.lee@chistvincent.com', 'Kim');
   void e3;
   await routes['POST /api/campaigns/:id/approve']({ params: { id: String(camp.id) }, body: { emails: ['kim.lee@chistvincent.com'] } });
-  history = [{ id: 'x', subject: 'RE: Ortho candidates', from: { emailAddress: { address: 'kim.lee@chistvincent.com' } }, toRecipients: [], receivedDateTime: new Date(Date.now() + 60000).toISOString(), internetMessageId: '<theirs@x>', conversationId: 'cv' }];
+  history = [{ id: 'x', subject: 'Ortho candidates', from: { emailAddress: { address: 'john@medconnectstaffing.com' } }, toRecipients: [{ emailAddress: { address: 'kim.lee@chistvincent.com' } }], sentDateTime: new Date(Date.now() + 60000).toISOString(), internetMessageId: '<mine@x>', conversationId: 'cv' }];
   const held = await sendTick({ force: true });
   assert.equal(held.reason, 'held for owner review');
   const hs = await one(`SELECT s.* FROM sequences s JOIN contacts c ON c.id = s.contact_id WHERE c.email = 'kim.lee@chistvincent.com'`);
@@ -118,6 +118,16 @@ test('CommonSpirit campaign', async () => {
   assert.equal(posted, 0, 'nothing sent');
   b = await routes['GET /api/campaigns/:id']({ params: { id: 'commonspirit' } });
   assert.equal(b.rows.find((x) => x.email === 'kim.lee@chistvincent.com').outlook.total, 1);
+  // She writes back before the next email: the campaign ends for her instead of sending
+  await routes['POST /api/campaigns/:id/approveFollowUps']({ params: { id: String(camp.id) }, body: { seqIds: [hs.id] } });
+  await q(`UPDATE sequences SET approved_step = step WHERE id = $1`, [hs.id]);
+  history = [{ id: 'y', subject: 'RE: CommonSpirit MSA', from: { emailAddress: { address: 'kim.lee@chistvincent.com' } }, toRecipients: [], receivedDateTime: new Date(Date.now() + 120000).toISOString(), internetMessageId: '<theirs@x>', conversationId: 'c1' }];
+  await (await import('../src/db.js')).kvSet('reply_polled_at', new Date().toISOString());
+  const st = await sendTick({ force: true });
+  assert.match(st.reason, /stopped|Replied/i, JSON.stringify(st));
+  const after = await one('SELECT status, replied, stop_reason FROM sequences WHERE id = $1', [hs.id]);
+  assert.equal(after.status, 'stopped'); assert.match(after.stop_reason, /^Replied/);
+  assert.equal(posted, 0, 'nothing sent');
   cfg.dryRun = true;
 });
 
