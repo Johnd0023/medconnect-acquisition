@@ -202,7 +202,7 @@ const TZ = "America/New_York";
 const fmtDay = (d) => d ? new Date(d).toLocaleDateString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric" }) : "—";
 const fmtShort = (d) => d ? new Date(d).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" }) : "—";
 const fmtTime = (d) => d ? new Date(d).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
-const VIEWS = [["today", "Today's Opportunities"], ["queue", "Prospect Queue"], ["outreach", "Outreach Activity"], ["responses", "Response Queue"], ["optouts", "Opt-outs"], ["contacts", "Client Contacts"], ["performance", "Performance"], ["settings", "Settings"]];
+const VIEWS = [["today", "Today's Opportunities"], ["queue", "Prospect Queue"], ["outreach", "Outreach Activity"], ["responses", "Response Queue"], ["campaign", "CommonSpirit MSA"], ["optouts", "Opt-outs"], ["contacts", "Client Contacts"], ["performance", "Performance"], ["settings", "Settings"]];
 const CAT_LABEL = { interested: "Interested", not_now: "Not right now", referral: "Referral", wrong_contact: "Wrong contact", opt_out: "Opt-out", ooo: "Out of office", bounce: "Bounced", other: "Other reply" };
 const CAT_PILL = { interested: "p-good", referral: "p-info", not_now: "p-mute", wrong_contact: "p-warn", opt_out: "p-bad", ooo: "p-mute", bounce: "p-bad", other: "p-mute" };
 let ui = { cf: { q: "", source: "", status: "", state: "", direct: false }, cpage: 0, queueTab: "review", drawer: null, tpl: "initial_opening", overview: null, settingsData: null };
@@ -258,7 +258,7 @@ async function renderNav() {
   const o = ui.overview;
   const v = view();
   const c = o?.counts || {};
-  const badge = o ? { today: o.fresh.length, queue: (c.ready || 0) + (c.review || 0) + (c.contact || 0), outreach: o.send.due, responses: o.totals.unhandled, contacts: o.totals.contacts, optouts: o.totals.optouts } : {};
+  const badge = o ? { today: o.fresh.length, queue: (c.ready || 0) + (c.review || 0) + (c.contact || 0), outreach: o.send.due, responses: o.totals.unhandled, contacts: o.totals.contacts, optouts: o.totals.optouts, campaign: o.totals.campaign } : {};
   document.getElementById("nav").innerHTML = VIEWS.map(([k, l]) => `<a href="#${k}"${v === k ? ' aria-current="page"' : ""}><span>${l}</span>${badge[k] !== undefined ? `<span class="count">${badge[k]}</span>` : ""}</a>`).join("");
   if (!o) return;
   const s = o.send;
@@ -626,6 +626,161 @@ async function renderSettings() {
   </div></section>`;
 }
 
+/* ---------------- client campaign (CommonSpirit MSA) ---------------- */
+const CSTAGES = [
+  ["review", "To review", "Not emailed yet. Tick the people to email and approve."],
+  ["followup", "Follow-ups to approve", "Due now. Nothing sends until you approve it."],
+  ["queued", "Approved, sending", "Go out next, inside your send window."],
+  ["sequence", "In sequence", "First email sent; next follow-up scheduled."],
+  ["done", "Replied or finished", "Replied, stopped or finished."],
+  ["skipped", "Skipped", "You chose not to email these people."],
+  ["nocontact", "No direct contact", "Openings with only a PracticeMatch address."],
+  ["setup", "Emails & settings", "Templates, entities, daily limit."],
+];
+function campChecks(r) {
+  const out = [];
+  if (!r.checkedAt) out.push('<span class="pill p-mute">Outlook not checked</span>');
+  else if (r.outlook?.total) out.push(`<span class="pill p-warn">${r.outlook.total} email${r.outlook.total === 1 ? "" : "s"} in Outlook</span><div class="sub">Last ${fmtShort(r.outlook.last.at)} ${esc(r.outlook.last.direction)}: “${esc((r.outlook.last.subject || "").slice(0, 70))}”</div>`);
+  else out.push('<span class="pill p-good">No Outlook history</span>');
+  if (r.appEmailed) out.push(`<div><span class="pill p-warn">Prospect email sent ${fmtShort(r.appEmailed.at)}</span></div>`);
+  if (r.replied) out.push(`<div><span class="pill ${CAT_PILL[r.replied.category] || "p-info"}">Replied ${fmtShort(r.replied.at)}: ${esc(CAT_LABEL[r.replied.category] || "reply")}</span></div>`);
+  if (r.seq?.holdNote) out.push(`<div class="sub" style="color:var(--warn)">${esc(r.seq.holdNote)}</div>`);
+  if (r.decisionNote) out.push(`<div class="sub">Note: ${esc(r.decisionNote)}</div>`);
+  if (r.edited.length) out.push(`<div class="sub">✎ Edited for this person</div>`);
+  return out.join("");
+}
+function campWho(r) {
+  return `<b>${esc(r.name || r.email)}</b>${r.title ? `<div class="sm">${esc(r.title)}</div>` : ""}<div class="mono sm">${esc(r.email)}</div>`;
+}
+function campWhere(r) {
+  const ops = r.openings.slice(0, 3).map((o) => `<div class="sm">${esc([o.specialty, o.role].filter(Boolean).join(" "))} · ${esc([o.city, o.state].filter(Boolean).join(", "))} · ${fmtShort(o.postedAt)}${o.code ? ` · <span class="mono">${esc(o.code)}</span>` : ""}</div>`).join("");
+  return `<b>${esc(r.entity)}</b>${r.matchedAs && r.matchedAs !== r.entity ? `<div class="sub">${esc(r.matchedAs)}</div>` : ""}${ops || '<div class="sub">No open posting on file</div>'}${r.otherEntities.length ? `<div class="sub">Also posting for ${esc([...new Set(r.otherEntities)].join(", "))}</div>` : ""}`;
+}
+function campPreviewRow(r, cols) {
+  const P = ui.camp.preview;
+  if (!P || P.email !== r.email) return "";
+  const steps = [0, 1, 2].map((s) => `<button class="tab" data-cprev="${esc(r.email)}" data-step="${s}" aria-pressed="${P.step === s}">${s === 0 ? "Initial email" : "Follow-up " + s}</button>`).join("");
+  const D = P.data;
+  let inner = '<div class="sub">Loading…</div>';
+  if (D && P.editing) inner = `<div class="field"><label for="cd-subj">Subject${P.step > 0 ? " (follow-ups reply in the same thread)" : ""}</label><input type="text" id="cd-subj" value="${esc(D.draft.subject || "")}"></div>
+      <div class="field"><label for="cd-body">Email</label><textarea id="cd-body" class="prose" style="min-height:300px">${esc(D.draft.body || "")}</textarea><span class="hint">Only for ${esc(r.email)}. Your signature and P.S. are added automatically.</span></div>
+      <div class="actions"><button class="btn sm primary" data-cact="saveDraft">Save for this person</button><button class="btn sm" data-cact="cancelEdit">Cancel</button></div>`;
+  else if (D) inner = `<div class="sub">To ${esc(D.to)}${D.edited ? " · edited for this person" : ""}</div><div class="email" style="white-space:normal;background:#fff"><div class="subj" style="font-weight:600;margin-bottom:8px">${esc(D.subject)}</div>${D.html}</div>
+      ${D.missing.length ? `<div><span class="pill p-warn">Would pause: missing ${esc(D.missing.join(", "))}</span></div>` : ""}
+      <div class="actions"><button class="btn sm" data-cact="edit">Edit for this person</button>${D.edited ? '<button class="btn sm" data-cact="resetDraft">Use the campaign template</button>' : ""}<button class="btn sm" data-cact="closePreview">Close</button></div>`;
+  return `<tr><td colspan="${cols}" style="background:var(--sunk)"><div style="display:flex;flex-direction:column;gap:10px;max-width:760px"><div class="tabs">${steps}</div>${inner}</div></td></tr>`;
+}
+async function loadCampPreview() {
+  const P = ui.camp.preview; if (!P) return;
+  try { P.data = await api(`/api/campaigns/${ui.campId}/preview?email=${encodeURIComponent(P.email)}&step=${P.step}`); } catch (e) { toast(e.message, true); ui.camp.preview = null; }
+}
+async function renderCampaign() {
+  const d = await api("/api/campaigns/commonspirit");
+  ui.campId = d.campaign.id;
+  const C = (ui.camp ||= { tab: "review", sel: new Set(), fsel: new Set(), q: "", lim: 50, preview: null });
+  if (C.preview && !C.preview.data) await loadCampPreview();
+  const camp = d.campaign; const cnt = d.counts;
+  const qq = C.q.trim().toLowerCase();
+  const rows = d.rows.filter((r) => r.stage === C.tab && (!qq || [r.name, r.email, r.entity, r.title, ...r.openings.map((o) => `${o.specialty} ${o.role} ${o.city} ${o.state}`)].join(" ").toLowerCase().includes(qq)));
+  const tiles = CSTAGES.map(([k, l, s]) => `<button class="kpi" data-ctab="${k}" aria-pressed="${C.tab === k}" style="text-align:left;cursor:pointer;font:inherit;${C.tab === k ? "outline:2px solid var(--accent);" : ""}"><span class="l">${l}</span><span class="v">${k === "setup" ? "⚙" : cnt[k] ?? 0}</span><span class="s">${s}</span></button>`).join("");
+  const warn = [!d.outlookConnected ? '<div class="banner" style="background:var(--warn-soft,#fff7e6);border:1px solid #f3d9a4;border-radius:10px;padding:10px 14px">Outlook isn\'t connected, so earlier emails can\'t be checked. Connect it in Settings → Integrations.</div>' : "",
+    !camp.active ? '<div style="background:#fdecec;border:1px solid #f5c2c2;border-radius:10px;padding:10px 14px"><b>Campaign paused.</b> Approved emails wait here until you resume it.</div>' : ""].join("");
+  let body = "";
+  const searchBox = `<input type="text" id="campq" placeholder="Search name, email, entity or specialty" value="${esc(C.q)}" style="max-width:320px">`;
+  if (C.tab === "review") {
+    const shown = rows.slice(0, C.lim);
+    body = `<section class="card"><div class="ch" style="flex-wrap:wrap;gap:8px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn primary" data-cact="approve" id="camp-approve" ${C.sel.size ? "" : "disabled"}>Approve selected (${C.sel.size})</button><button class="btn" data-cact="skip" ${C.sel.size ? "" : "disabled"} id="camp-skip">Skip selected</button><button class="btn" data-cact="checkSel" ${C.sel.size ? "" : "disabled"} id="camp-check">Check Outlook for selected</button></div>${searchBox}</div>
+      ${shown.length ? `<div class="tablewrap"><table class="ctable"><colgroup><col style="width:38px"><col style="width:24%"><col style="width:32%"><col><col style="width:150px"></colgroup>
+      <thead><tr><th><input type="checkbox" data-cselall aria-label="Select all shown" ${shown.length && shown.every((r) => C.sel.has(r.email)) ? "checked" : ""}></th><th>Contact</th><th>Entity and openings</th><th>Before you approve</th><th></th></tr></thead><tbody>
+      ${shown.map((r) => `<tr><td><input type="checkbox" data-csel="${esc(r.email)}" aria-label="Select ${esc(r.name || r.email)}" ${C.sel.has(r.email) ? "checked" : ""}></td><td>${campWho(r)}</td><td>${campWhere(r)}</td><td>${campChecks(r)}</td>
+        <td><div class="actions" style="flex-direction:column;align-items:stretch"><button class="btn sm" data-cprev="${esc(r.email)}" data-step="0">Preview email</button><button class="btn sm" data-copen="${r.employerId}">Open client</button></div></td></tr>${campPreviewRow(r, 5)}`).join("")}</tbody></table></div>
+      ${rows.length > C.lim ? `<div class="cb" style="text-align:center"><button class="btn sm" data-cact="more">Show 50 more of ${rows.length - C.lim}</button></div>` : ""}`
+      : `<div class="empty">${qq ? "Nobody matches that search." : "Nobody left to review."}</div>`}</section>`;
+  } else if (C.tab === "followup") {
+    body = `<section class="card"><div class="ch" style="flex-wrap:wrap;gap:8px"><button class="btn primary" data-cact="approveF" id="camp-approvef" ${C.fsel.size ? "" : "disabled"}>Approve selected follow-ups (${C.fsel.size})</button>${searchBox}</div>
+      ${rows.length ? `<div class="tablewrap"><table class="ctable"><colgroup><col style="width:38px"><col style="width:24%"><col style="width:30%"><col><col style="width:150px"></colgroup>
+      <thead><tr><th><input type="checkbox" data-fselall aria-label="Select all" ${rows.every((r) => C.fsel.has(r.seq.id)) ? "checked" : ""}></th><th>Contact</th><th>Entity</th><th>Before you approve</th><th></th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td><input type="checkbox" data-fsel="${r.seq.id}" aria-label="Select ${esc(r.name || r.email)}" ${C.fsel.has(r.seq.id) ? "checked" : ""}></td><td>${campWho(r)}<div class="sub">Follow-up ${r.seq.step} due · last email ${fmtShort(r.seq.lastSent)}</div></td><td>${campWhere(r)}</td><td>${campChecks(r)}</td>
+        <td><div class="actions" style="flex-direction:column;align-items:stretch"><button class="btn sm" data-cprev="${esc(r.email)}" data-step="${r.seq.step}">Preview follow-up</button><button class="btn sm danger" data-cstop="${r.seq.id}">Stop</button></div></td></tr>${campPreviewRow(r, 5)}`).join("")}</tbody></table></div>` : '<div class="empty">No follow-ups waiting for you.</div>'}</section>`;
+  } else if (["queued", "sequence", "done"].includes(C.tab)) {
+    body = `<section class="card"><div class="ch"><h2>${CSTAGES.find((x) => x[0] === C.tab)[1]} · ${rows.length}</h2>${searchBox}</div>${rows.length ? `<div class="tablewrap"><table class="ctable"><colgroup><col style="width:26%"><col style="width:30%"><col><col style="width:110px"></colgroup><tbody>
+      ${rows.map((r) => `<tr><td>${campWho(r)}</td><td>${campWhere(r)}</td><td class="sm">${r.seq.status === "active" ? (r.seq.step === 0 ? "Initial email approved, waiting to send" : `Follow-up ${r.seq.step} on ${fmtShort(r.seq.nextAt)}${r.seq.approvedStep >= r.seq.step ? " (approved)" : " (needs your OK when due)"}`) : esc(r.seq.stopReason || r.seq.status)}${r.seq.lastSent ? `<div class="sub">Last email ${fmtShort(r.seq.lastSent)}</div>` : ""}${r.replied ? `<div><span class="pill ${CAT_PILL[r.replied.category] || "p-info"}">${esc(CAT_LABEL[r.replied.category] || "Replied")}</span></div>` : ""}</td>
+        <td>${r.seq.status === "active" ? `<button class="btn sm danger" data-cstop="${r.seq.id}">Stop</button>` : `<button class="btn sm" data-copen="${r.employerId}">Open</button>`}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Nobody here yet.</div>'}</section>`;
+  } else if (C.tab === "skipped") {
+    body = `<section class="card"><div class="ch"><h2>Skipped · ${rows.length}</h2>${searchBox}</div>${rows.length ? `<div class="tablewrap"><table class="ctable"><tbody>${rows.map((r) => `<tr><td>${campWho(r)}</td><td>${campWhere(r)}</td><td class="sm">${esc(r.decisionNote || "")}</td><td style="width:140px"><button class="btn sm" data-cunskip="${esc(r.email)}">Move back to review</button></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Nobody skipped.</div>'}</section>`;
+  } else if (C.tab === "nocontact") {
+    body = `<section class="card"><div class="ch"><h2>Openings with no direct contact · ${d.noContact.length}</h2><span class="sub">These postings only list a PracticeMatch address, which is never emailed. Find the recruiter with Lusha or add one by hand.</span></div>${d.noContact.length ? `<div class="tablewrap"><table class="ctable"><colgroup><col style="width:30%"><col><col style="width:190px"></colgroup><tbody>${d.noContact.map((e) => `<tr><td><b>${esc(e.entity)}</b>${e.matchedAs !== e.entity ? `<div class="sub">${esc(e.matchedAs)}</div>` : ""}<div class="sub">${esc([e.city, e.state].filter(Boolean).join(", "))}${e.domain ? ` · ${esc(e.domain)}` : ""}</div></td>
+      <td>${e.openings.map((o) => `<div class="sm">${esc([o.specialty, o.role].filter(Boolean).join(" "))} · ${esc([o.city, o.state].filter(Boolean).join(", "))} · ${fmtShort(o.postedAt)}${o.code ? ` · <span class="mono">${esc(o.code)}</span>` : ""}</div>`).join("")}${e.openingCount > 4 ? `<div class="sub">+${e.openingCount - 4} more</div>` : ""}</td>
+      <td><div class="actions" style="flex-direction:column;align-items:stretch"><button class="btn sm primary" data-emp="${e.employerId}" data-a="enrich">Find contacts with Lusha</button><button class="btn sm" data-copen="${e.employerId}">Add a contact by hand</button></div></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Every open posting has a direct contact.</div>'}</section>`;
+  } else {
+    const T = camp.templates;
+    body = `<section class="card"><div class="ch"><h2>Campaign settings</h2></div><div class="cb form">
+      <div class="field"><label for="cs-name">Campaign name</label><input type="text" id="cs-name" value="${esc(camp.name)}"></div>
+      <div class="field"><label for="cs-client">Client name in emails ({{client}})</label><input type="text" id="cs-client" value="${esc(camp.client)}"></div>
+      <div class="field"><label for="cs-limit">Campaign emails per day</label><input type="number" id="cs-limit" min="1" max="200" value="${camp.settings.dailyLimit}"><span class="hint">Counts toward your overall daily cap too.</span></div>
+      <div class="field"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="cs-appf" ${camp.settings.approveFollowUps ? "checked" : ""} style="width:auto"> Approve each follow-up too</label><span class="hint">On: each follow-up waits for your OK when it's due. Off: approving someone approves all 3 emails.</span></div>
+      <div class="field" style="grid-column:1/-1"><label for="cs-family">${esc(camp.client)} entities, one per line: <span class="mono">Name | domain.com</span>. End a name with <span class="mono">*</span> to match names that start with it.</label><textarea id="cs-family" style="min-height:260px">${esc(camp.family)}</textarea><span class="hint">${d.entities} employer records in your database match today. Anyone at these names or email domains shows up in To review, including clients that are protected or suppressed for prospecting.</span></div>
+    </div></section>
+    ${["initial_opening", "initial_general", "followup_1", "followup_2"].map((k) => `<section class="card"><div class="ch"><h2>${esc(T[k].label)}</h2></div><div class="cb form">
+      ${k.startsWith("initial") ? `<div class="field" style="grid-column:1/-1"><label for="ct-${k}-s">Subject</label><input type="text" id="ct-${k}-s" value="${esc(T[k].subject)}"></div>` : ""}
+      <div class="field" style="grid-column:1/-1"><label for="ct-${k}-b">Body</label><textarea id="ct-${k}-b" class="prose" style="min-height:300px">${esc(T[k].body)}</textarea></div></div></section>`).join("")}
+    <div class="hint">Fields: {{first_name}} {{client}} {{employer}} (the entity) {{role}} {{specialty}} {{city}} {{state}} {{more_openings}} {{signal_line}} {{sender_name}} {{brochure}}. Your signature and P.S. are added automatically. Follow-ups reply in the same thread, so they keep the first subject.</div>
+    <div class="actions"><button class="btn primary" data-cact="saveSetup">Save campaign</button></div>`;
+  }
+  return `<div class="head"><div><h1>${esc(camp.name)}</h1><p>Recruiters and hiring contacts at ${esc(camp.client)} and its entities. This runs separately from prospect outreach, where these clients stay protected. Nothing sends until you approve that email, and right before each one goes out, Outlook is searched again for any email with that person since you approved.</p></div>
+    <div class="actions"><span class="sub">${d.sentToday} of ${camp.settings.dailyLimit} campaign emails today${d.dryRun ? " (dry run)" : ""}</span><span class="pill ${camp.active ? "p-good" : "p-bad"}">${camp.active ? "Active" : "Paused"}</span><button class="btn" data-cact="toggle">${camp.active ? "Pause campaign" : "Resume campaign"}</button><button class="btn" data-cact="checkAll" ${d.outlookConnected ? "" : "disabled"}>Check Outlook for everyone</button></div></div>
+    ${warn}
+    <div class="kpis" role="group" aria-label="Campaign stages">${tiles}</div>
+    ${d.optedOut || d.relayOnly ? `<div class="sub">Not listed: ${d.optedOut} opted out or bounced${d.relayOnly ? `, ${d.relayOnly} entities whose postings only have a PracticeMatch address (see No direct contact)` : ""}.</div>` : ""}
+    ${body}`;
+}
+async function campaignClick(t) {
+  const C = ui.camp; const id = ui.campId;
+  const tab = t.closest("[data-ctab]"); if (tab) { C.tab = tab.dataset.ctab; C.sel.clear(); C.fsel.clear(); C.preview = null; C.lim = 50; renderAll(); return true; }
+  const pv = t.closest("[data-cprev]");
+  if (pv) { const step = Number(pv.dataset.step); if (C.preview?.email === pv.dataset.cprev && C.preview.step === step && !pv.closest(".tabs")) C.preview = null; else C.preview = { email: pv.dataset.cprev, step, data: null }; renderAll(); return true; }
+  const op = t.closest("[data-copen]"); if (op) { ui.drawer = Number(op.dataset.copen); renderDrawer(); return true; }
+  const st = t.closest("[data-cstop]"); if (st) { if (!confirm("Stop this person's campaign emails?")) return true; act(api(`/api/campaigns/${id}/stop`, { method: "POST", body: { seqId: Number(st.dataset.cstop) } })); return true; }
+  const un = t.closest("[data-cunskip]"); if (un) { act(api(`/api/campaigns/${id}/unskip`, { method: "POST", body: { emails: [un.dataset.cunskip] } })); return true; }
+  const a = t.closest("[data-cact]"); if (!a) return false;
+  const sel = [...C.sel];
+  switch (a.dataset.cact) {
+    case "approve": {
+      const flagged = sel.filter((e) => { const b = document.querySelector(`[data-csel="${CSS.escape(e)}"]`)?.closest("tr"); return b && /email(s)? in Outlook|Prospect email sent|Replied/.test(b.textContent); });
+      if (!confirm(`Approve the initial email to ${sel.length} ${sel.length === 1 ? "person" : "people"}?${flagged.length ? `\n\n${flagged.length} of them already have email history with you. Make sure you're not mid-conversation.` : ""}`)) return true;
+      a.disabled = true; await act(api(`/api/campaigns/${id}/approve`, { method: "POST", body: { emails: sel } })); C.sel.clear(); return true;
+    }
+    case "skip": { const note = prompt(`Skip ${sel.length}? Optional note (for example "Already talking with her"):`, ""); if (note === null) return true; await act(api(`/api/campaigns/${id}/skip`, { method: "POST", body: { emails: sel, note } })); C.sel.clear(); return true; }
+    case "checkSel": a.disabled = true; a.textContent = "Checking…"; await act(api(`/api/campaigns/${id}/checkOutlook`, { method: "POST", body: { emails: sel } })); return true;
+    case "checkAll": a.disabled = true; a.textContent = "Checking Outlook…"; await act(api(`/api/campaigns/${id}/checkOutlook`, { method: "POST", body: {} })); return true;
+    case "approveF": a.disabled = true; await act(api(`/api/campaigns/${id}/approveFollowUps`, { method: "POST", body: { seqIds: [...C.fsel] } })); C.fsel.clear(); return true;
+    case "toggle": act(api(`/api/campaigns/${id}`, { method: "PUT", body: { active: !/Pause/.test(a.textContent) ? true : false } })); return true;
+    case "more": C.lim += 50; renderAll(); return true;
+    case "closePreview": C.preview = null; renderAll(); return true;
+    case "edit": C.preview.editing = true; renderAll(); return true;
+    case "cancelEdit": C.preview.editing = false; renderAll(); return true;
+    case "saveDraft": { const P = C.preview; await act(api(`/api/campaigns/${id}/draft`, { method: "PUT", body: { email: P.email, step: P.step, subject: document.getElementById("cd-subj").value, body: document.getElementById("cd-body").value } })); P.editing = false; P.data = null; renderAll(); return true; }
+    case "resetDraft": { const P = C.preview; await act(api(`/api/campaigns/${id}/draft`, { method: "DELETE", body: { email: P.email, step: P.step } })); P.data = null; renderAll(); return true; }
+    case "saveSetup": {
+      const v = (x) => document.getElementById(x)?.value;
+      const templates = {};
+      for (const k of ["initial_opening", "initial_general", "followup_1", "followup_2"]) templates[k] = { body: v(`ct-${k}-b`), ...(k.startsWith("initial") ? { subject: v(`ct-${k}-s`) } : {}) };
+      act(api(`/api/campaigns/${id}`, { method: "PUT", body: { name: v("cs-name"), client: v("cs-client"), family: v("cs-family"), templates, settings: { dailyLimit: Number(v("cs-limit")), approveFollowUps: document.getElementById("cs-appf").checked } } }));
+      return true;
+    }
+  }
+  return false;
+}
+function campaignChange(t) {
+  const C = ui.camp; if (!C) return false;
+  const upd = () => { for (const [idn, n, l] of [["camp-approve", C.sel.size, "Approve selected"], ["camp-approvef", C.fsel.size, "Approve selected follow-ups"]]) { const b = document.getElementById(idn); if (b) { b.disabled = !n; b.textContent = `${l} (${n})`; } } for (const idn of ["camp-skip", "camp-check"]) { const b = document.getElementById(idn); if (b) b.disabled = !C.sel.size; } };
+  if (t.dataset.csel !== undefined) { t.checked ? C.sel.add(t.dataset.csel) : C.sel.delete(t.dataset.csel); upd(); return true; }
+  if (t.dataset.fsel !== undefined) { t.checked ? C.fsel.add(Number(t.dataset.fsel)) : C.fsel.delete(Number(t.dataset.fsel)); upd(); return true; }
+  if (t.hasAttribute("data-cselall")) { document.querySelectorAll("[data-csel]").forEach((x) => { x.checked = t.checked; t.checked ? C.sel.add(x.dataset.csel) : C.sel.delete(x.dataset.csel); }); upd(); return true; }
+  if (t.hasAttribute("data-fselall")) { document.querySelectorAll("[data-fsel]").forEach((x) => { x.checked = t.checked; t.checked ? C.fsel.add(Number(x.dataset.fsel)) : C.fsel.delete(Number(x.dataset.fsel)); }); upd(); return true; }
+  return false;
+}
+
 /* ---------------- opt-outs ---------------- */
 async function renderOptouts() {
   const f = ui.oo || { kind: "opt", q: "" };
@@ -733,11 +888,11 @@ async function renderAll() {
     ui.overview = await api("/api/overview");
     await renderNav();
     const v = view();
-    const html = await ({ today: renderToday, queue: renderQueue, outreach: renderOutreach, responses: renderResponses, optouts: renderOptouts, contacts: renderContacts, performance: renderPerformance, settings: renderSettings })[v]();
+    const html = await ({ today: renderToday, queue: renderQueue, outreach: renderOutreach, responses: renderResponses, campaign: renderCampaign, optouts: renderOptouts, contacts: renderContacts, performance: renderPerformance, settings: renderSettings })[v]();
     const m = document.getElementById("main");
     const focusId = document.activeElement?.id; const pos = document.activeElement?.selectionStart;
     m.innerHTML = html;
-    if (focusId === "qsearch" || focusId === "cq" || focusId === "ooq") { const el = document.getElementById(focusId); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch {} } }
+    if (focusId === "qsearch" || focusId === "cq" || focusId === "ooq" || focusId === "campq") { const el = document.getElementById(focusId); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch {} } }
     if (v === "settings") { await fillBookmarklet(); previewTemplate(); }
     await renderDrawer();
   } catch (e) { toast(e.message, true); }
@@ -766,6 +921,7 @@ async function saveSetting(patch, quiet) {
 
 document.addEventListener("click", async (ev) => {
   const t = ev.target;
+  if (view() === "campaign" && ui.camp && !t.closest(".drawer") && await campaignClick(t)) return;
   const tab = t.closest("[data-tab]"); if (tab) { ui.queueTab = tab.dataset.tab; return renderAll(); }
   const tp = t.closest("[data-tpl]"); if (tp) { ui.tpl = tp.dataset.tpl; return renderAll(); }
   if (t.closest("[data-rename]")) { ui.renaming = ui.renaming === Number(ui.drawer) ? null : Number(ui.drawer); return renderDrawer(); }
@@ -860,6 +1016,7 @@ document.addEventListener("click", async (ev) => {
 
 document.addEventListener("change", async (ev) => {
   const t = ev.target;
+  if (view() === "campaign" && campaignChange(t)) return;
   if (t.id === "bro-file" && t.files?.[0]) {
     const f = t.files[0];
     if (f.size > 3 * 1024 * 1024) { t.value = ""; return toast(`That file is ${(f.size / 1048576).toFixed(1)} MB. Keep it under 3 MB.`, true); }
@@ -910,12 +1067,13 @@ document.addEventListener("change", async (ev) => {
 document.addEventListener("input", (ev) => {
   if (ev.target.id === "qsearch") { clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
   if (ev.target.id === "ooq") { ui.oo = { ...(ui.oo || { kind: "opt" }), q: ev.target.value }; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
+  if (ev.target.id === "campq") { ui.camp.q = ev.target.value; ui.camp.lim = 50; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
   if (ev.target.id === "cq") { ui.cf.q = ev.target.value; ui.cpage = 0; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
   if (ev.target.id === "tpl-body" || ev.target.id === "tpl-subject") { clearTimeout(previewTimer); previewTimer = setTimeout(previewTemplate, 400); }
 });
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && ui.drawer) { ui.drawer = null; ui.editing = null; ui.renaming = null; renderDrawer(); } });
 window.addEventListener("hashchange", () => { renderAll(); window.scrollTo(0, 0); });
-setInterval(() => { if (!document.hidden && !ui.drawer && !["settings"].includes(view()) && document.activeElement?.tagName !== "INPUT") renderAll(); }, 60000);
+setInterval(() => { if (!document.hidden && !ui.drawer && !["settings", "campaign"].includes(view()) && document.activeElement?.tagName !== "INPUT") renderAll(); }, 60000);
 renderAll();
 </script>
 

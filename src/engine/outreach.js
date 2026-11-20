@@ -5,6 +5,7 @@ import { cfg } from '../config.js';
 import { getSettings } from '../settings.js';
 import { loadContext, requalify, protectedRecipientMatch } from './qualify.js';
 import { compose } from './compose.js';
+import { getCampaign, parseFamily, familyMatch, otherProtectedContext, checkOutlook, composeInputs } from './campaigns.js';
 import { brochureFor } from '../brochure.js';
 import { instrument, newToken } from '../tracking.js';
 import * as outlook from '../integrations/outlook.js';
@@ -137,6 +138,9 @@ async function claimNext(settings) {
       WHERE s.status = 'active' AND s.next_at <= now()
         AND (s.claimed_at IS NULL OR s.claimed_at < now() - interval '10 minutes')
         AND (SELECT count(*) FROM messages m WHERE m.employer_id = s.employer_id AND m.sent_at >= $1) < $2
+        AND (s.campaign_id IS NULL OR (s.approved_step >= s.step AND EXISTS (SELECT 1 FROM campaigns c WHERE c.id = s.campaign_id AND c.active
+             AND (SELECT count(*) FROM messages m2 JOIN sequences s2 ON s2.id = m2.sequence_id WHERE s2.campaign_id = c.id AND m2.status IN ('sent','dry_run') AND m2.sent_at >= $1)
+                 < coalesce((c.settings->>'dailyLimit')::int, 25))))
       ORDER BY s.priority DESC, s.step DESC, s.next_at ASC
       LIMIT 1 FOR UPDATE SKIP LOCKED)
     RETURNING *`, [startOfBusinessDay(), settings.perEmployerPerDay]);
@@ -150,6 +154,7 @@ export async function sendTick({ force = false } = {}) {
   const s = st.settings;
   const seq = await claimNext(s);
   if (!seq) return { sent: false, reason: 'Nothing due' };
+  if (seq.campaign_id) return campaignSend(seq, s);
 
   const ctx = await loadContext();
   const r = await requalify(seq.employer_id, ctx);
@@ -187,6 +192,11 @@ export async function sendTick({ force = false } = {}) {
   const m = compose(emp, addressee, r.openings, seq.step, s, bro);
   const attachments = bro?.attachment?.contentBytes ? [bro.attachment] : undefined;
   if (m.missing.length) { await stopSequenceById(seq.id, `Missing verified fact: ${m.missing.join(', ')}`, 'paused'); return { sent: false, reason: 'paused (missing fact)' }; }
+  return deliver({ seq, emp, contact, recipients, m, attachments, s, ctx });
+}
+
+/** Send (or dry-run) one composed email, record it, and move the sequence to its next step. */
+async function deliver({ seq, emp, contact, recipients, m, attachments, s, ctx, label: labelPrefix = '' }) {
   const toList = recipients.map((c) => ({ address: c.email, name: c.full_name || undefined }));
   const trackToken = newToken();
   if (m.html) m.html = instrument(m.html, trackToken, s);
@@ -217,7 +227,7 @@ export async function sendTick({ force = false } = {}) {
   if (seq.priority) await q('UPDATE sequences SET priority = 0 WHERE id = $1', [seq.id]);
   await kvSet('next_send_at', new Date(Date.now() + randInt(s.minGapSeconds, s.maxGapSeconds) * 1000).toISOString());
 
-  const label = seq.step === 0 ? 'Initial email' : `Follow-up ${seq.step}`;
+  const label = labelPrefix + (seq.step === 0 ? 'Initial email' : `Follow-up ${seq.step}`);
   if (status === 'failed') {
     await stopSequenceById(seq.id, `${label} failed to send: ${error}`);
     return { sent: false, reason: `failed: ${error}` };
@@ -241,6 +251,50 @@ export async function sendTick({ force = false } = {}) {
   }
   await requalify(emp.id, ctx);
   return { sent: true, to: recipients.map((c) => c.email).join(', '), subject: m.subject };
+}
+
+/**
+ * A client-campaign email (e.g. CommonSpirit MSA). The owner approved this exact step. Protection for the campaign's
+ * own client is lifted; every other check still applies, plus a fresh Outlook search for email with this person
+ * since the approval (anything new puts it back in front of the owner instead of sending).
+ */
+async function campaignSend(seq, s) {
+  const camp = await getCampaign(seq.campaign_id);
+  const fam = parseFamily(camp.family);
+  const ctx = await loadContext();
+  const emp = await one('SELECT * FROM employers WHERE id = $1', [seq.employer_id]);
+  const [openings, contacts] = await Promise.all([
+    q('SELECT * FROM openings WHERE employer_id = $1', [emp.id]), q('SELECT * FROM contacts WHERE employer_id = $1', [emp.id])]);
+  const contact = contacts.find((c) => c.id === seq.contact_id);
+  const stop = async (why, status = 'stopped') => { await stopSequenceById(seq.id, why, status); return { sent: false, reason: why }; };
+  if (!contact?.email || isRelay(contact.email)) return stop('No direct email address');
+  const email = contact.email.toLowerCase();
+  if (contact.bad || ctx.suppressedEmails.has(email) || ctx.suppressedDomains.has(email.split('@')[1])) return stop('Contact opted out, bounced, or was marked wrong');
+  if (!familyMatch({ employer: emp, contacts: [contact], openings }, fam)) return stop(`No longer matches ${camp.client}`);
+  const other = protectedRecipientMatch({ employer: emp, contacts: [contact], openings }, await otherProtectedContext(fam));
+  if (other) { await logEvent(emp.id, `${camp.name} email to ${email} BLOCKED: also matches protected client "${other}"`); return stop(`Blocked: also matches protected client "${other}"`); }
+  if (!cfg.dryRun) {
+    let hold = null;
+    try {
+      const { messages } = await checkOutlook(camp.id, email);
+      const since = new Date(seq.approved_at || seq.started_at);
+      const fresh = messages.filter((x) => new Date(x.at) > since);
+      if (fresh.length) hold = `New Outlook email with ${email} since you approved this (${new Date(fresh[0].at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: "${(fresh[0].subject || '').slice(0, 80)}"). Check it, then approve again.`;
+    } catch (e) { hold = `Couldn't check Outlook for earlier emails (${e.message}). Approve again to retry.`; }
+    if (hold) {
+      await q('UPDATE sequences SET approved_step = step - 1, hold_note = $2, claimed_at = NULL, priority = 0 WHERE id = $1', [seq.id, hold]);
+      await logEvent(emp.id, `${camp.name}: held before sending. ${hold}`);
+      return { sent: false, reason: 'held for owner review' };
+    }
+  }
+  const inputs = await composeInputs(camp, email);
+  const bro = await brochureFor(seq.step, s, { lineOnly: cfg.dryRun });
+  const m = compose({ ...emp, drafts: inputs.drafts }, contact, openings, seq.step, { ...s, templates: inputs.templates }, bro, inputs.extra);
+  if (m.missing.length) return stop(`Missing verified fact: ${m.missing.join(', ')}`, 'paused');
+  const attachments = bro?.attachment?.contentBytes ? [bro.attachment] : undefined;
+  const r = await deliver({ seq, emp, contact, recipients: [contact], m, attachments, s, ctx, label: `${camp.name}: ` });
+  if (r.sent && !r.dryRun) await q(`UPDATE sequences SET priority = 0, hold_note = NULL WHERE id = $1`, [seq.id]);
+  return r;
 }
 
 export async function clearSendBlock() { await kvSet('send_blocked', null); }

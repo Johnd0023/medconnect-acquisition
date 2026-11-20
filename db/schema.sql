@@ -273,3 +273,32 @@ WHERE s.status IN ('active','paused') AND EXISTS (SELECT 1 FROM contacts c WHERE
 UPDATE sequences s SET cc_contact_ids = ARRAY(SELECT x FROM unnest(s.cc_contact_ids) x WHERE NOT EXISTS (SELECT 1 FROM contacts c WHERE c.id = x AND c.email ILIKE '%@practicematch.com'))
 WHERE s.status IN ('active','paused') AND EXISTS (SELECT 1 FROM contacts c WHERE c.id = ANY(s.cc_contact_ids) AND c.email ILIKE '%@practicematch.com');
 UPDATE settings SET data = jsonb_set(data, '{practicematch,relayOutreach}', 'false') WHERE data ? 'practicematch';
+-- Client campaigns (e.g. CommonSpirit MSA): separate contact list, own templates, every email approved by the owner
+CREATE TABLE IF NOT EXISTS campaigns (
+  id          serial PRIMARY KEY,
+  slug        text NOT NULL UNIQUE,
+  name        text NOT NULL,
+  client      text NOT NULL,
+  active      boolean NOT NULL DEFAULT true,
+  family      text NOT NULL DEFAULT '',
+  templates   jsonb NOT NULL DEFAULT '{}'::jsonb,
+  settings    jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS campaign_contacts (
+  campaign_id int NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  email       text NOT NULL,
+  decision    text,
+  note        text,
+  drafts      jsonb NOT NULL DEFAULT '{}'::jsonb,
+  outlook     jsonb,
+  checked_at  timestamptz,
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (campaign_id, email)
+);
+ALTER TABLE sequences ADD COLUMN IF NOT EXISTS campaign_id int REFERENCES campaigns(id) ON DELETE SET NULL;
+ALTER TABLE sequences ADD COLUMN IF NOT EXISTS approved_step int NOT NULL DEFAULT -1;
+ALTER TABLE sequences ADD COLUMN IF NOT EXISTS approved_at timestamptz;
+ALTER TABLE sequences ADD COLUMN IF NOT EXISTS hold_note text;
+CREATE INDEX IF NOT EXISTS sequences_campaign_ix ON sequences (campaign_id) WHERE campaign_id IS NOT NULL;
+INSERT INTO campaigns (slug, name, client) VALUES ('commonspirit', 'CommonSpirit MSA', 'CommonSpirit Health') ON CONFLICT (slug) DO NOTHING;

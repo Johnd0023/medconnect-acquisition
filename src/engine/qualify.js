@@ -301,7 +301,7 @@ export async function requalify(employerId, ctx) {
   const [openings, contacts, seqs] = await Promise.all([
     q('SELECT * FROM openings WHERE employer_id = $1', [emp.id]),
     q('SELECT * FROM contacts WHERE employer_id = $1', [emp.id]),
-    q('SELECT * FROM sequences WHERE employer_id = $1', [emp.id]),
+    q('SELECT * FROM sequences WHERE employer_id = $1 AND campaign_id IS NULL', [emp.id]), // client campaigns live apart from prospect outreach
   ]);
   const r = evaluate(emp, openings, contacts, seqs, ctx);
   await q('UPDATE employers SET status = $2, reasons = $3::jsonb, score = $4, bucket = $5 WHERE id = $1',

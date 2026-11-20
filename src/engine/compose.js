@@ -54,13 +54,13 @@ export function withSignature(body, settings) {
 }
 
 /** Compose the email for `step` (0 = initial, 1-2 = follow-ups). */
-export function compose(emp, contact, openings, step, settings, brochure = null) {
+export function compose(emp, contact, openings, step, settings, brochure = null, extra = {}) {
   const t = settings.templates;
   const hasOpening = openings.some((o) => o.active);
   const key = step === 0 ? (hasOpening ? 'initial_opening' : 'initial_general') : step === 1 ? 'followup_1' : 'followup_2';
   const draft = emp?.drafts?.[String(step)];
   const tpl = draft?.body ? { label: 'Edited for this client', subject: draft.subject || t[key].subject, body: draft.body } : t[key];
-  const r = render(tpl, { ...fieldsFor(emp, contact, openings, settings), brochure: brochure?.line || '', brochure_url: brochure?.url || '' });
+  const r = render(tpl, { ...fieldsFor(emp, contact, openings, settings), ...extra, brochure: brochure?.line || '', brochure_url: brochure?.url || '' });
   // Brochure line: where the template puts {{brochure}}, otherwise as its own paragraph just above the sign-off
   if (brochure?.line && !/\{\{\s*brochure(_url)?\s*\}\}/.test(tpl.body)) {
     const paras = r.body.replace(/\s+$/, '').split(/\n{2,}/);
@@ -148,13 +148,13 @@ export function htmlFor(body, settings, brochure) {
  * Starting text for "Edit this email": the template filled in for this client, with the parts that differ per
  * recipient kept as fields ({{first_name}}, {{brochure_url}}) and the typed sign-off removed (the signature is added).
  */
-export function draftFor(emp, contact, openings, step, settings) {
+export function draftFor(emp, contact, openings, step, settings, extra = {}) {
   const saved = emp?.drafts?.[String(step)];
   if (saved?.body) return { subject: saved.subject, body: saved.body, edited: true };
   const hasOpening = openings.some((o) => o.active);
   const key = step === 0 ? (hasOpening ? 'initial_opening' : 'initial_general') : step === 1 ? 'followup_1' : 'followup_2';
   const keep = { first_name: '{{first_name}}', brochure_url: '{{brochure_url}}', brochure: '{{brochure}}' };
-  const r = render(settings.templates[key], { ...fieldsFor(emp, contact, openings, settings), ...keep });
+  const r = render(settings.templates[key], { ...fieldsFor(emp, contact, openings, settings), ...extra, ...keep });
   const body = settings.signature?.enabled ? stripSignOff(r.body, settings) : r.body;
   return { subject: r.subject, body: body.replace(/\n{3,}/g, '\n\n').trim(), edited: false };
 }

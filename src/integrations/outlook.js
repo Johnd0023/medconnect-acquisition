@@ -157,3 +157,20 @@ export async function inboxSince(since) {
 export async function whoAmI() {
   return graph('GET', '/me?$select=mail,userPrincipalName,displayName');
 }
+
+/**
+ * Every email in the mailbox (any folder) to or from this address, newest first. Used to check whether the owner is
+ * already talking with someone before a campaign email goes out.
+ */
+export async function historyWith(email, top = 25) {
+  const search = encodeURIComponent(`"participants:${String(email).replace(/"/g, '')}"`);
+  const r = await graph('GET', `/me/messages?$search=${search}&$top=${top}&$select=id,subject,from,toRecipients,ccRecipients,sentDateTime,receivedDateTime,internetMessageId,conversationId,isDraft`);
+  return (r.value || []).filter((m) => !m.isDraft).map((m) => ({
+    subject: m.subject || '',
+    from: (m.from?.emailAddress?.address || '').toLowerCase(),
+    to: [...(m.toRecipients || []), ...(m.ccRecipients || [])].map((x) => (x.emailAddress?.address || '').toLowerCase()),
+    at: m.receivedDateTime || m.sentDateTime,
+    internetMessageId: m.internetMessageId || null,
+    conversationId: m.conversationId || null,
+  })).sort((a, b) => new Date(b.at) - new Date(a.at));
+}

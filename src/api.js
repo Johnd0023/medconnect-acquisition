@@ -8,10 +8,11 @@ import { engagement } from './tracking.js';
 import { runHealthCheck, healthHistory } from './health.js';
 import { listContacts, updateContact, createContact, exportContacts, STATUSES } from './contacts.js';
 import { brochureFor, brochureMeta, publicUrl, saveBrochure, deleteBrochure } from './brochure.js';
-import { enroll, readyIds, stopSequence, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
+import { enroll, readyIds, stopSequence, stopSequenceById, resumeSequence, sendState, sendTick, clearSendBlock } from './engine/outreach.js';
 import { runDiscovery, importListings, lushaFillContacts, resolveIndustries, runPracticeMatchScan } from './engine/discovery.js';
 import { pollReplies, referralFrom, optOutEmail } from './engine/replies.js';
 import { writeXlsx } from './xlsx.js';
+import * as campaigns from './engine/campaigns.js';
 import { addContact, inferType } from './engine/ingest.js';
 import { runJob } from './scheduler.js';
 import { ingestToken, starter } from './collector.js';
@@ -74,16 +75,108 @@ export const routes = {
     const lastRun = await one(`SELECT * FROM job_runs WHERE job = 'discovery' ORDER BY started_at DESC LIMIT 1`);
     const lastScan = await one(`SELECT * FROM job_runs WHERE job = 'pm-scan' ORDER BY started_at DESC LIMIT 1`);
     const st = await sendState();
-    const due = Number((await one(`SELECT count(*) AS n FROM sequences WHERE status = 'active' AND next_at <= now()`)).n);
+    const due = Number((await one(`SELECT count(*) AS n FROM sequences WHERE status = 'active' AND next_at <= now() AND campaign_id IS NULL`)).n);
     const totals = await one(`SELECT (SELECT count(*) FROM employers) AS employers, (SELECT count(*) FROM contacts) AS contacts,
       (SELECT count(*) FROM sequences WHERE status = 'active') AS active, (SELECT count(*) FROM replies) AS replies,
-      (SELECT count(*) FROM replies WHERE NOT handled) AS unhandled, (SELECT count(*) FROM suppressions WHERE kind = 'email' AND reason = 'Opted out') AS optouts, (SELECT count(*) FROM tasks WHERE NOT done) AS tasks`);
+      (SELECT count(*) FROM replies WHERE NOT handled) AS unhandled, 0 AS campaign, (SELECT count(*) FROM suppressions WHERE kind = 'email' AND reason = 'Opted out') AS optouts, (SELECT count(*) FROM tasks WHERE NOT done) AS tasks`);
     return {
       now: new Date(), timezone: cfg.timezone, counts, fresh: await Promise.all(fresh.map(async (e) => employerRow(e, ctxAll))),
-      lastRun, lastScan, send: { ...st, settings: undefined, due }, totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, Number(v)])),
+      lastRun, lastScan, send: { ...st, settings: undefined, due }, totals: { ...Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, Number(v)])), campaign: await campaigns.pendingCount().catch(() => 0) },
       credits: await lusha.creditsUsed(), budget: s.lusha.monthlyCreditBudget,
       mode: { supervised: s.supervised, paused: s.paused, dryRun: cfg.dryRun, threshold: s.threshold, autoEnroll: s.autoEnroll },
     };
+  },
+
+  /* ---------- client campaigns (CommonSpirit MSA) ---------- */
+  'GET /api/campaigns/:id': async ({ params }) => {
+    const camp = await campaigns.getCampaign(params.id);
+    if (!camp) throw httpError(404, 'Campaign not found');
+    const b = await campaigns.campaignBoard(camp.id);
+    const outlookConn = await outlook.connection();
+    return { ...b, outlookConnected: outlookConn.connected, dryRun: cfg.dryRun };
+  },
+  'PUT /api/campaigns/:id': async ({ params, body }) => {
+    const camp = await campaigns.getCampaign(params.id);
+    if (!camp) throw httpError(404, 'Campaign not found');
+    const name = String(body.name ?? camp.name).trim().slice(0, 80) || camp.name;
+    const client = String(body.client ?? camp.client).trim().slice(0, 80) || camp.client;
+    const family = String(body.family ?? camp.family).slice(0, 20000);
+    if (!campaigns.parseFamily(family).names.length && !campaigns.parseFamily(family).domains.length) throw httpError(400, 'Add at least one entity name or domain.');
+    const templates = { ...camp.templates };
+    for (const [k, v] of Object.entries(body.templates || {})) if (templates[k]) templates[k] = { ...templates[k], subject: String(v.subject ?? templates[k].subject).slice(0, 300), body: String(v.body ?? templates[k].body).slice(0, 20000) };
+    const settings = { ...camp.settings, ...(body.settings || {}) };
+    settings.dailyLimit = Math.max(1, Math.min(200, Number(settings.dailyLimit) || 25));
+    settings.approveFollowUps = settings.approveFollowUps !== false;
+    const active = body.active === undefined ? camp.active : Boolean(body.active);
+    await q('UPDATE campaigns SET name = $2, client = $3, family = $4, templates = $5::jsonb, settings = $6::jsonb, active = $7 WHERE id = $1',
+      [camp.id, name, client, family, JSON.stringify(templates), JSON.stringify(settings), active]);
+    return { ok: true, message: body.active !== undefined ? (active ? 'Campaign sending is on.' : 'Campaign paused: nothing will send until you turn it back on.') : 'Campaign saved.' };
+  },
+  'POST /api/campaigns/:id/approve': async ({ params, body }) => {
+    const emails = (body.emails || []).map(String).filter(Boolean);
+    if (!emails.length) throw httpError(400, 'Tick at least one person.');
+    const r = await campaigns.approvePeople(params.id, emails);
+    return { ok: true, message: `${r.queued} approved and queued${r.skipped.length ? `. Not queued: ${r.skipped.join('; ')}` : ''}.` };
+  },
+  'POST /api/campaigns/:id/approveFollowUps': async ({ params, body }) => {
+    const n = await campaigns.approveFollowUps(Number(params.id), (body.seqIds || []).map(Number));
+    return { ok: true, message: `${n} follow-up${n === 1 ? '' : 's'} approved.` };
+  },
+  'POST /api/campaigns/:id/skip': async ({ params, body }) => {
+    const n = await campaigns.setDecision(Number(params.id), (body.emails || []).map(String), 'skipped', String(body.note || '').slice(0, 300) || null);
+    return { ok: true, message: `${n} skipped. They won't be emailed by this campaign.` };
+  },
+  'POST /api/campaigns/:id/unskip': async ({ params, body }) => {
+    await campaigns.setDecision(Number(params.id), (body.emails || []).map(String), null, null);
+    return { ok: true, message: 'Moved back to To review.' };
+  },
+  'POST /api/campaigns/:id/stop': async ({ params, body }) => {
+    const s = await one('SELECT * FROM sequences WHERE id = $1 AND campaign_id = $2', [Number(body.seqId), Number(params.id)]);
+    if (!s) throw httpError(404, 'Not found');
+    await stopSequenceById(s.id, 'Stopped by owner');
+    return { ok: true, message: 'Stopped. No more campaign emails to this person.' };
+  },
+  'POST /api/campaigns/:id/checkOutlook': async ({ params, body }) => {
+    const camp = await campaigns.getCampaign(params.id);
+    let emails = (body.emails || []).map((e) => String(e).toLowerCase());
+    if (!emails.length) {
+      const b = await campaigns.campaignBoard(camp.id);
+      emails = b.rows.filter((r) => ['review', 'followup'].includes(r.stage) && (!r.checkedAt || Date.now() - new Date(r.checkedAt) > 864e5)).map((r) => r.email);
+    }
+    const batch = emails.slice(0, 40);
+    let found = 0; let errors = 0; let lastErr = '';
+    for (const e of batch) {
+      try { const r = await campaigns.checkOutlook(camp.id, e); if (r.summary.total) found++; } catch (err) { errors++; lastErr = err.message; if (/not connected/i.test(err.message)) break; }
+    }
+    if (errors && errors === batch.length) throw httpError(502, `Couldn't search Outlook: ${lastErr}`);
+    const left = emails.length - batch.length;
+    return { ok: true, message: `Checked ${batch.length - errors} in Outlook: ${found} with earlier emails.${left > 0 ? ` ${left} more to check: click again.` : ''}` };
+  },
+  'GET /api/campaigns/:id/preview': async ({ params, query }) => {
+    const camp = await campaigns.getCampaign(params.id);
+    const email = String(query.email || '').toLowerCase();
+    const step = Math.max(0, Math.min(2, Number(query.step) || 0));
+    const b = await campaigns.campaignBoard(camp.id);
+    const row = b.rows.find((r) => r.email === email);
+    if (!row) throw httpError(404, 'Not on the list');
+    const emp = await one('SELECT * FROM employers WHERE id = $1', [row.employerId]);
+    const contact = await one('SELECT * FROM contacts WHERE id = $1', [row.contactId]);
+    const openings = await q('SELECT * FROM openings WHERE employer_id = $1', [emp.id]);
+    const s = await getSettings();
+    const inputs = await campaigns.composeInputs(camp, email);
+    const bro = await brochureFor(step, s, { lineOnly: true });
+    const m = compose({ ...emp, drafts: inputs.drafts }, contact, openings, step, { ...s, templates: inputs.templates }, bro, inputs.extra);
+    const draft = draftFor({ ...emp, drafts: inputs.drafts }, contact, openings, step, { ...s, templates: inputs.templates }, inputs.extra);
+    return { subject: m.subject, html: m.html, body: m.body, missing: m.missing, edited: m.edited, draft, to: contact.email, step };
+  },
+  'PUT /api/campaigns/:id/draft': async ({ params, body }) => {
+    if (!String(body.body || '').trim()) throw httpError(400, 'The email is empty.');
+    await campaigns.saveDraft(Number(params.id), String(body.email), Number(body.step) || 0, body);
+    return { ok: true, message: 'Saved for this person.' };
+  },
+  'DELETE /api/campaigns/:id/draft': async ({ params, body }) => {
+    await campaigns.saveDraft(Number(params.id), String(body.email), Number(body.step) || 0, null);
+    return { ok: true, message: 'Back to the campaign template.' };
   },
 
   'GET /api/employers': async ({ query }) => {
@@ -269,14 +362,14 @@ export const routes = {
   'GET /api/outreach': async () => {
     const st = await sendState();
     const due = await q(`SELECT s.*, e.name, c.full_name, c.email FROM sequences s JOIN employers e ON e.id = s.employer_id JOIN contacts c ON c.id = s.contact_id
-                         WHERE s.status = 'active' AND s.next_at <= now() ORDER BY s.priority DESC, s.step DESC, s.next_at LIMIT 2000`);
+                         WHERE s.status = 'active' AND s.next_at <= now() AND s.campaign_id IS NULL ORDER BY s.priority DESC, s.step DESC, s.next_at LIMIT 2000`);
     const upcoming = await q(`SELECT s.*, e.name, c.full_name FROM sequences s JOIN employers e ON e.id = s.employer_id JOIN contacts c ON c.id = s.contact_id
-                              WHERE s.status = 'active' AND s.next_at > now() ORDER BY s.next_at LIMIT 2000`);
-    const stopped = await q(`SELECT s.*, e.name FROM sequences s JOIN employers e ON e.id = s.employer_id WHERE s.status <> 'active' ORDER BY s.started_at DESC LIMIT 500`);
+                              WHERE s.status = 'active' AND s.next_at > now() AND s.campaign_id IS NULL ORDER BY s.next_at LIMIT 2000`);
+    const stopped = await q(`SELECT s.*, e.name FROM sequences s JOIN employers e ON e.id = s.employer_id WHERE s.status <> 'active' AND s.campaign_id IS NULL ORDER BY s.started_at DESC LIMIT 500`);
     const counts = await q(`SELECT step, count(*) FILTER (WHERE status = 'active' AND next_at <= now())::int AS due, count(*) FILTER (WHERE status = 'active' AND next_at > now())::int AS scheduled
-                            FROM sequences GROUP BY step ORDER BY step`);
+                            FROM sequences WHERE campaign_id IS NULL GROUP BY step ORDER BY step`);
     const sentBy = await q(`SELECT step, count(*)::int AS n FROM messages WHERE status = 'sent' GROUP BY step`);
-    const stoppedTotal = (await one(`SELECT count(*)::int AS n FROM sequences WHERE status <> 'active'`)).n;
+    const stoppedTotal = (await one(`SELECT count(*)::int AS n FROM sequences WHERE status <> 'active' AND campaign_id IS NULL`)).n;
     const log = await q(`SELECT m.id, m.employer_id, e.name, m.to_email, m.subject, m.status, m.error, m.step, m.sent_at, EXISTS (SELECT 1 FROM email_events x WHERE x.message_id = m.id AND x.kind = 'open' AND NOT x.machine) AS opened, EXISTS (SELECT 1 FROM email_events x WHERE x.message_id = m.id AND x.kind = 'click' AND NOT x.machine) AS clicked FROM messages m JOIN employers e ON e.id = m.employer_id ORDER BY m.sent_at DESC LIMIT 100`);
     return { send: { ...st, settings: undefined }, due, upcoming, stopped, log, counts, sentBy, stoppedTotal };
   },
