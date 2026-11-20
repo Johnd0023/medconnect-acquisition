@@ -757,7 +757,6 @@ async function renderCampaign() {
     body = `<section class="card"><div class="ch"><h2>Campaign settings</h2></div><div class="cb form">
       <div class="field"><label for="cs-name">Campaign name</label><input type="text" id="cs-name" value="${esc(camp.name)}"></div>
       <div class="field"><label for="cs-client">Client name in emails ({{client}})</label><input type="text" id="cs-client" value="${esc(camp.client)}"></div>
-      <div class="field"><label for="cs-limit">Campaign emails per day</label><input type="number" id="cs-limit" min="1" max="200" value="${camp.settings.dailyLimit}"><span class="hint">Counts toward your overall daily cap too.</span></div>
       <div class="field"><label for="cs-steps">Default emails per person</label><select id="cs-steps">${stepOpts(camp.settings.defaultSteps)}</select><span class="hint">What each person's dropdown starts on in To review. Change it per person before or after approving.</span></div>
       <div class="field"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="cs-appf" ${camp.settings.approveFollowUps ? "checked" : ""} style="width:auto"> Approve each follow-up too</label><span class="hint">On: each follow-up waits for your OK when it's due. Off: approving someone approves all 3 emails.</span></div>
       <div class="field" style="grid-column:1/-1"><label for="cs-family">${esc(camp.client)} entities, one per line: <span class="mono">Name | domain.com</span>. End a name with <span class="mono">*</span> to match names that start with it.</label><textarea id="cs-family" style="min-height:260px">${esc(camp.family)}</textarea><span class="hint">${d.entities} employer records in your database match today. Anyone at these names or email domains shows up in To review, including clients that are protected or suppressed for prospecting.</span></div>
@@ -765,7 +764,7 @@ async function renderCampaign() {
     <div class="actions"><button class="btn primary" data-cact="saveSetup">Save settings</button></div>`;
   }
   return `<div class="head"><div><h1>${esc(camp.name)}</h1><p>Recruiters and hiring contacts at ${esc(camp.client)} and its entities. This runs separately from prospect outreach, where these clients stay protected. Nothing sends until you approve that email, and right before each one goes out, Outlook is searched again for any email with that person since you approved.</p></div>
-    <div class="actions"><span class="sub">${d.sentToday} of ${camp.settings.dailyLimit} campaign emails today${d.dryRun ? " (dry run)" : ""}</span><span class="pill ${camp.active ? "p-good" : "p-bad"}">${camp.active ? "Active" : "Paused"}</span><button class="btn" data-cact="toggle">${camp.active ? "Pause campaign" : "Resume campaign"}</button><button class="btn" data-cact="checkAll" ${d.outlookConnected ? "" : "disabled"}>Check Outlook for everyone</button></div></div>
+    <div class="actions"><span class="sub">${d.sentToday} campaign email${d.sentToday === 1 ? "" : "s"} today${d.dryRun ? " (dry run)" : ""} · uses your daily cap, no separate limit</span><span class="pill ${camp.active ? "p-good" : "p-bad"}">${camp.active ? "Active" : "Paused"}</span><button class="btn" data-cact="toggle">${camp.active ? "Pause campaign" : "Resume campaign"}</button><button class="btn" data-cact="checkAll" ${d.outlookConnected ? "" : "disabled"}>Check Outlook for everyone</button></div></div>
     ${modeBanner(ui.overview?.mode)}${warn}
     <div class="kpis" role="group" aria-label="Campaign stages">${tiles}</div>
     ${d.optedOut || d.relayOnly ? `<div class="sub">Not listed: ${d.optedOut} opted out or bounced${d.relayOnly ? `, ${d.relayOnly} entities whose postings only have a PracticeMatch address (see No direct contact)` : ""}.</div>` : ""}
@@ -819,7 +818,7 @@ async function campaignClick(t) {
     case "resetDraft": { const P = C.preview; await act(api(`/api/campaigns/${id}/draft`, { method: "DELETE", body: { email: P.email, step: P.step } })); P.data = null; renderAll(); return true; }
     case "saveSetup": {
       const v = (x) => document.getElementById(x)?.value;
-      act(api(`/api/campaigns/${id}`, { method: "PUT", body: { name: v("cs-name"), client: v("cs-client"), family: v("cs-family"), settings: { dailyLimit: Number(v("cs-limit")), defaultSteps: Number(v("cs-steps")), approveFollowUps: document.getElementById("cs-appf").checked } } }));
+      act(api(`/api/campaigns/${id}`, { method: "PUT", body: { name: v("cs-name"), client: v("cs-client"), family: v("cs-family"), settings: { defaultSteps: Number(v("cs-steps")), approveFollowUps: document.getElementById("cs-appf").checked } } }));
       return true;
     }
   }

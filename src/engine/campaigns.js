@@ -89,7 +89,7 @@ Thank you,
   },
 };
 
-export const CAMPAIGN_DEFAULT_SETTINGS = { dailyLimit: 25, approveFollowUps: true, defaultSteps: 3 };
+export const CAMPAIGN_DEFAULT_SETTINGS = { approveFollowUps: true, defaultSteps: 3 };
 
 /** Create the built-in CommonSpirit campaign once. */
 export async function ensureCampaigns() {

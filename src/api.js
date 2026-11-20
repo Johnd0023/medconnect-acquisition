@@ -134,7 +134,6 @@ export const routes = {
     if (body.resetTemplate && campaigns.COMMONSPIRIT_TEMPLATES[body.resetTemplate]) templates[body.resetTemplate] = campaigns.COMMONSPIRIT_TEMPLATES[body.resetTemplate];
     for (const [k, v] of Object.entries(body.templates || {})) if (templates[k]) templates[k] = { ...templates[k], subject: String(v.subject ?? templates[k].subject).slice(0, 300), body: String(v.body ?? templates[k].body).slice(0, 20000) };
     const settings = { ...camp.settings, ...(body.settings || {}) };
-    settings.dailyLimit = Math.max(1, Math.min(200, Number(settings.dailyLimit) || 25));
     settings.approveFollowUps = settings.approveFollowUps !== false;
     settings.defaultSteps = Math.max(1, Math.min(3, Number(settings.defaultSteps) || 3));
     const active = body.active === undefined ? camp.active : Boolean(body.active);

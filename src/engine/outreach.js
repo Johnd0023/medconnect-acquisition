@@ -148,9 +148,8 @@ async function claimNext(settings) {
         AND (s.claimed_at IS NULL OR s.claimed_at < now() - interval '10 minutes')
         AND NOT s.editing
         AND (SELECT count(*) FROM messages m WHERE m.employer_id = s.employer_id AND m.sent_at >= $1) < $2
-        AND (s.campaign_id IS NULL OR (s.approved_step >= s.step AND EXISTS (SELECT 1 FROM campaigns c WHERE c.id = s.campaign_id AND c.active
-             AND (SELECT count(*) FROM messages m2 JOIN sequences s2 ON s2.id = m2.sequence_id WHERE s2.campaign_id = c.id AND m2.status IN ('sent','dry_run') AND m2.sent_at >= $1)
-                 < coalesce((c.settings->>'dailyLimit')::int, 25))))
+        -- Client-campaign emails: only the step the owner approved, only while the campaign is on (no separate daily limit)
+        AND (s.campaign_id IS NULL OR (s.approved_step >= s.step AND EXISTS (SELECT 1 FROM campaigns c WHERE c.id = s.campaign_id AND c.active)))
       -- 1) emails the owner pushed with "Send first"  2) approved client-campaign emails (CommonSpirit MSA)  3) everything else
       ORDER BY (s.campaign_id IS NULL AND s.priority > 0) DESC, (s.campaign_id IS NOT NULL) DESC, s.step DESC, s.next_at ASC
       LIMIT 1 FOR UPDATE SKIP LOCKED)
