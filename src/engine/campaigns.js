@@ -89,7 +89,7 @@ Thank you,
   },
 };
 
-export const CAMPAIGN_DEFAULT_SETTINGS = { dailyLimit: 25, approveFollowUps: true };
+export const CAMPAIGN_DEFAULT_SETTINGS = { dailyLimit: 25, approveFollowUps: true, defaultSteps: 3 };
 
 /** Create the built-in CommonSpirit campaign once. */
 export async function ensureCampaigns() {
@@ -247,7 +247,7 @@ export async function campaignBoard(campaignId) {
     } else if (d?.decision === 'skipped') stage = 'skipped';
     return { ...p, stage, decisionNote: d?.note || null, outlook: d?.outlook || null, checkedAt: d?.checked_at || null, edited: Object.keys(d?.drafts || {}).filter((k) => d.drafts[k]?.body),
       appEmailed: priorBy.get(p.email) || null, replied: repBy.get(p.email) || null,
-      seq: s ? { id: s.id, step: s.step, status: s.status, nextAt: s.next_at, approvedStep: s.approved_step, stopReason: s.stop_reason, holdNote: s.hold_note, lastSent: s.last_sent, replied: s.replied } : null };
+      seq: s ? { id: s.id, step: s.step, maxSteps: s.max_steps, status: s.status, nextAt: s.next_at, approvedStep: s.approved_step, stopReason: s.stop_reason, holdNote: s.hold_note, lastSent: s.last_sent, replied: s.replied } : null };
   }).sort((a, b) => new Date(b.openings[0]?.postedAt || 0) - new Date(a.openings[0]?.postedAt || 0) || a.entity.localeCompare(b.entity));
   noContact.sort((a, b) => new Date(b.openings[0]?.postedAt || 0) - new Date(a.openings[0]?.postedAt || 0));
   const counts = { review: 0, followup: 0, queued: 0, sequence: 0, done: 0, skipped: 0 };
@@ -294,7 +294,7 @@ export async function checkOutlook(campaignId, email) {
 
 /* ---------------- owner decisions ---------------- */
 
-export async function approvePeople(campaignId, emails) {
+export async function approvePeople(campaignId, emails, steps = null) {
   const camp = await getCampaign(campaignId);
   const board = await campaignBoard(camp.id);
   const by = new Map(board.rows.map((r) => [r.email, r]));
@@ -306,11 +306,12 @@ export async function approvePeople(campaignId, emails) {
     if (r.seq) { skipped.push(`${r.email} (already received the campaign)`); continue; }
     const busy = await one(`SELECT 1 FROM sequences WHERE contact_id = $1 AND status = 'active'`, [r.contactId]);
     if (busy) { skipped.push(`${r.email} (in a regular outreach sequence right now)`); continue; }
-    const approvedStep = camp.settings.approveFollowUps ? 0 : 2;
-    await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status, campaign_id, approved_step, approved_at, priority) VALUES ($1,$2,0, now(),'active',$3,$4, now(), 0)`,
-      [r.employerId, r.contactId, camp.id, approvedStep]);
+    const max = Math.max(1, Math.min(3, Number(steps || camp.settings.defaultSteps) || 3));
+    const approvedStep = camp.settings.approveFollowUps ? 0 : max - 1;
+    await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status, campaign_id, approved_step, approved_at, priority, max_steps) VALUES ($1,$2,0, now(),'active',$3,$4, now(), 0, $5)`,
+      [r.employerId, r.contactId, camp.id, approvedStep, max]);
     await q(`INSERT INTO campaign_contacts (campaign_id, email, decision) VALUES ($1,$2,'approved') ON CONFLICT (campaign_id, email) DO UPDATE SET decision = 'approved', updated_at = now()`, [camp.id, r.email]);
-    await logEvent(r.employerId, `${camp.name}: initial email to ${r.email} approved by owner`);
+    await logEvent(r.employerId, `${camp.name}: ${max === 1 ? 'initial email only' : max === 2 ? 'initial email + follow-up 1' : 'all 3 emails'} to ${r.email} approved by owner`);
     queued++;
   }
   return { queued, skipped };
@@ -321,6 +322,24 @@ export async function approveFollowUps(campaignId, seqIds) {
                         WHERE campaign_id = $1 AND id = ANY($2::int[]) AND status = 'active' AND approved_step < step RETURNING id, employer_id, step`, [campaignId, seqIds.map(Number)]);
   for (const r of rows) await logEvent(r.employer_id, `Campaign follow-up ${r.step} approved by owner`);
   return rows.length;
+}
+
+/** Change how many emails someone already in the campaign gets (1 = initial only … 3 = all). */
+export async function setSteps(campaignId, seqId, steps) {
+  const max = Math.max(1, Math.min(3, Number(steps) || 3));
+  const s = await one('SELECT * FROM sequences WHERE id = $1 AND campaign_id = $2', [seqId, campaignId]);
+  if (!s) throw new Error('Not found');
+  const sent = (await one(`SELECT count(*)::int AS n FROM messages WHERE sequence_id = $1 AND status = 'sent'`, [s.id])).n;
+  if (max <= sent && ['active', 'paused'].includes(s.status)) {
+    await q(`UPDATE sequences SET max_steps = $2, status = 'completed', stop_reason = 'No more emails: you chose ${max === 1 ? 'initial only' : `${max} emails`}', claimed_at = NULL WHERE id = $1`, [s.id, max]);
+  } else if (max > sent && s.status === 'completed' && !s.replied && /you chose/.test(s.stop_reason || '')) {
+    // Asked for more emails after it finished early: pick up with the next follow-up
+    await q(`UPDATE sequences SET max_steps = $2, status = 'active', stop_reason = NULL, step = $3, next_at = now() WHERE id = $1`, [s.id, max, sent]);
+  } else {
+    await q('UPDATE sequences SET max_steps = $2 WHERE id = $1', [s.id, max]);
+  }
+  await logEvent(s.employer_id, `Campaign emails for this contact set to ${max === 1 ? 'initial only' : max === 2 ? 'initial + follow-up 1' : 'all 3'}`);
+  return max;
 }
 
 export async function setDecision(campaignId, emails, decision, note = null) {

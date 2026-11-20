@@ -136,6 +136,7 @@ export const routes = {
     const settings = { ...camp.settings, ...(body.settings || {}) };
     settings.dailyLimit = Math.max(1, Math.min(200, Number(settings.dailyLimit) || 25));
     settings.approveFollowUps = settings.approveFollowUps !== false;
+    settings.defaultSteps = Math.max(1, Math.min(3, Number(settings.defaultSteps) || 3));
     const active = body.active === undefined ? camp.active : Boolean(body.active);
     await q('UPDATE campaigns SET name = $2, client = $3, family = $4, templates = $5::jsonb, settings = $6::jsonb, active = $7 WHERE id = $1',
       [camp.id, name, client, family, JSON.stringify(templates), JSON.stringify(settings), active]);
@@ -144,8 +145,12 @@ export const routes = {
   'POST /api/campaigns/:id/approve': async ({ params, body }) => {
     const emails = (body.emails || []).map(String).filter(Boolean);
     if (!emails.length) throw httpError(400, 'Tick at least one person.');
-    const r = await campaigns.approvePeople(params.id, emails);
+    const r = await campaigns.approvePeople(params.id, emails, body.steps);
     return { ok: true, message: `${r.queued} approved and queued${r.skipped.length ? `. Not queued: ${r.skipped.join('; ')}` : ''}.` };
+  },
+  'POST /api/campaigns/:id/steps': async ({ params, body }) => {
+    const n = await campaigns.setSteps(Number(params.id), Number(body.seqId), Number(body.steps));
+    return { ok: true, message: n === 1 ? 'Initial email only.' : n === 2 ? 'Initial email + follow-up 1.' : 'All 3 emails.' };
   },
   'POST /api/campaigns/:id/approveFollowUps': async ({ params, body }) => {
     const n = await campaigns.approveFollowUps(Number(params.id), (body.seqIds || []).map(Number));

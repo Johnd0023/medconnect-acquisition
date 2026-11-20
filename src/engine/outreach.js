@@ -252,8 +252,9 @@ async function deliver({ seq, emp, contact, recipients, m, attachments, s, ctx, 
 
   await logEvent(emp.id, `${label} sent to ${recipients.map((c) => c.email).join(', ')}`);
   const nextStep = seq.step + 1;
-  if (nextStep >= 3) {
-    await q(`UPDATE sequences SET step = $2, status = 'completed', stop_reason = 'Sequence finished with no reply', claimed_at = NULL, conversation_id = coalesce(conversation_id, $3) WHERE id = $1`, [seq.id, nextStep, result.conversationId || null]);
+  const maxSteps = Math.max(1, Math.min(3, seq.max_steps || 3));
+  if (nextStep >= maxSteps) {
+    await q(`UPDATE sequences SET step = $2, status = 'completed', stop_reason = '${maxSteps === 1 ? 'Sent only the initial email, as you chose. No reply' : maxSteps === 2 ? 'Sent the 2 emails you chose. No reply' : 'Sequence finished with no reply'}', claimed_at = NULL, conversation_id = coalesce(conversation_id, $3) WHERE id = $1`, [seq.id, nextStep, result.conversationId || null]);
   } else {
     const gap = nextStep === 1 ? s.followupGap1Days : s.followupGap2Days;
     const nextDay = addSendDays(new Date(), gap, s.sendDays);

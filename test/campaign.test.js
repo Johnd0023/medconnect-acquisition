@@ -136,3 +136,25 @@ test('send-first beats the campaign', async () => {
   const r2 = await sendTick({ force: true });
   assert.equal(r2.to, 'amy.lee@dignityhealth.org');
 });
+
+test('initial only, then extend', async () => {
+  const { q, one } = await import('../src/db.js');
+  const { sendTick } = await import('../src/engine/outreach.js');
+  const { routes } = await import('../src/api.js');
+  const camp = await one(`SELECT id FROM campaigns WHERE slug = 'commonspirit'`);
+  await q(`DELETE FROM sequences WHERE campaign_id = $1`, [camp.id]);
+  await q(`UPDATE sequences SET status = 'stopped' WHERE status IN ('active','paused')`);
+  await q(`DELETE FROM messages`); await q(`DELETE FROM campaign_contacts`);
+  await routes['POST /api/campaigns/:id/approve']({ params: { id: String(camp.id) }, body: { emails: ['amy.lee@dignityhealth.org'], steps: 1 } });
+  const r = await sendTick({ force: true });
+  assert.equal(r.to, 'amy.lee@dignityhealth.org');
+  let s = await one(`SELECT * FROM sequences WHERE campaign_id = $1`, [camp.id]);
+  // dry run pauses; simulate a live send finishing step 0
+  await q(`UPDATE messages SET status = 'sent'`);
+  await q(`UPDATE sequences SET status = 'completed', step = 1, stop_reason = 'Sent only the initial email, as you chose. No reply' WHERE id = $1`, [s.id]);
+  await routes['POST /api/campaigns/:id/steps']({ params: { id: String(camp.id) }, body: { seqId: s.id, steps: 3 } });
+  s = await one(`SELECT * FROM sequences WHERE id = $1`, [s.id]);
+  assert.equal(s.status, 'active'); assert.equal(s.step, 1); assert.equal(s.max_steps, 3);
+  await routes['POST /api/campaigns/:id/steps']({ params: { id: String(camp.id) }, body: { seqId: s.id, steps: 1 } });
+  assert.equal((await one(`SELECT status FROM sequences WHERE id = $1`, [s.id])).status, 'completed');
+});
