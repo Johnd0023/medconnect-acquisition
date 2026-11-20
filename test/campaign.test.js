@@ -61,12 +61,12 @@ test('CommonSpirit campaign', async () => {
   b = await routes['GET /api/campaigns/:id']({ params: { id: 'commonspirit' } });
   assert.equal(b.counts.queued, 1); assert.equal(b.counts.skipped, 1); assert.equal(b.counts.review, 0);
 
-  // A regular prospect follow-up with "send first" is due too: the approved campaign email still goes first
+  // Order: "Send first" (⚡) > approved campaign email > regular follow-up
   const pat = await one(`SELECT c.id, c.employer_id FROM contacts c WHERE c.email = 'pat@mercy.net'`);
-  const reg = await one(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status, priority) VALUES ($1,$2,1, now() - interval '1 day','active', 1) RETURNING id`, [pat.employer_id, pat.id]);
+  const reg = await one(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status) VALUES ($1,$2,1, now() - interval '1 day','active') RETURNING id`, [pat.employer_id, pat.id]);
   const r = await sendTick({ force: true });
   assert.equal(r.sent, true, JSON.stringify(r));
-  assert.equal(r.to, 'amy.lee@dignityhealth.org', 'campaign email first');
+  assert.equal(r.to, 'amy.lee@dignityhealth.org', 'campaign email before a regular follow-up');
   await q(`UPDATE sequences SET status = 'stopped' WHERE id = $1`, [reg.id]);
   const msg = await one(`SELECT * FROM messages WHERE to_email = 'amy.lee@dignityhealth.org'`);
   assert.match(msg.subject, /CommonSpirit Health MSA in place/);
@@ -119,4 +119,20 @@ test('CommonSpirit campaign', async () => {
   b = await routes['GET /api/campaigns/:id']({ params: { id: 'commonspirit' } });
   assert.equal(b.rows.find((x) => x.email === 'kim.lee@chistvincent.com').outlook.total, 1);
   cfg.dryRun = true;
+});
+
+test('send-first beats the campaign', async () => {
+  const { q, one } = await import('../src/db.js');
+  const { sendTick } = await import('../src/engine/outreach.js');
+  const camp = await one(`SELECT id FROM campaigns WHERE slug = 'commonspirit'`);
+  await q(`UPDATE sequences SET status = 'stopped' WHERE status IN ('active','paused')`);
+  await q(`DELETE FROM messages`);
+  const amy = await one(`SELECT id, employer_id FROM contacts WHERE email = 'amy.lee@dignityhealth.org'`);
+  const pat = await one(`SELECT id, employer_id FROM contacts WHERE email = 'pat@mercy.net'`);
+  await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status, campaign_id, approved_step, approved_at) VALUES ($1,$2,1, now(),'active',$3,1, now())`, [amy.employer_id, amy.id, camp.id]);
+  await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status, priority) VALUES ($1,$2,0, now(),'active',1)`, [pat.employer_id, pat.id]);
+  const r = await sendTick({ force: true });
+  assert.equal(r.to, 'pat@mercy.net', '⚡ Send first goes before the campaign');
+  const r2 = await sendTick({ force: true });
+  assert.equal(r2.to, 'amy.lee@dignityhealth.org');
 });

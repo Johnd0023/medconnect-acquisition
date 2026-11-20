@@ -307,7 +307,7 @@ export async function approvePeople(campaignId, emails) {
     const busy = await one(`SELECT 1 FROM sequences WHERE contact_id = $1 AND status = 'active'`, [r.contactId]);
     if (busy) { skipped.push(`${r.email} (in a regular outreach sequence right now)`); continue; }
     const approvedStep = camp.settings.approveFollowUps ? 0 : 2;
-    await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status, campaign_id, approved_step, approved_at, priority) VALUES ($1,$2,0, now(),'active',$3,$4, now(), 1)`,
+    await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status, campaign_id, approved_step, approved_at, priority) VALUES ($1,$2,0, now(),'active',$3,$4, now(), 0)`,
       [r.employerId, r.contactId, camp.id, approvedStep]);
     await q(`INSERT INTO campaign_contacts (campaign_id, email, decision) VALUES ($1,$2,'approved') ON CONFLICT (campaign_id, email) DO UPDATE SET decision = 'approved', updated_at = now()`, [camp.id, r.email]);
     await logEvent(r.employerId, `${camp.name}: initial email to ${r.email} approved by owner`);
@@ -317,7 +317,7 @@ export async function approvePeople(campaignId, emails) {
 }
 
 export async function approveFollowUps(campaignId, seqIds) {
-  const rows = await q(`UPDATE sequences SET approved_step = step, approved_at = now(), hold_note = NULL, priority = 1
+  const rows = await q(`UPDATE sequences SET approved_step = step, approved_at = now(), hold_note = NULL
                         WHERE campaign_id = $1 AND id = ANY($2::int[]) AND status = 'active' AND approved_step < step RETURNING id, employer_id, step`, [campaignId, seqIds.map(Number)]);
   for (const r of rows) await logEvent(r.employer_id, `Campaign follow-up ${r.step} approved by owner`);
   return rows.length;

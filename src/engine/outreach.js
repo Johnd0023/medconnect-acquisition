@@ -150,8 +150,8 @@ async function claimNext(settings) {
         AND (s.campaign_id IS NULL OR (s.approved_step >= s.step AND EXISTS (SELECT 1 FROM campaigns c WHERE c.id = s.campaign_id AND c.active
              AND (SELECT count(*) FROM messages m2 JOIN sequences s2 ON s2.id = m2.sequence_id WHERE s2.campaign_id = c.id AND m2.status IN ('sent','dry_run') AND m2.sent_at >= $1)
                  < coalesce((c.settings->>'dailyLimit')::int, 25))))
-      -- Approved client-campaign emails (CommonSpirit MSA) always go first; unapproved ones never match above
-      ORDER BY (s.campaign_id IS NOT NULL) DESC, s.priority DESC, s.step DESC, s.next_at ASC
+      -- 1) emails the owner pushed with "Send first"  2) approved client-campaign emails (CommonSpirit MSA)  3) everything else
+      ORDER BY (s.campaign_id IS NULL AND s.priority > 0) DESC, (s.campaign_id IS NOT NULL) DESC, s.step DESC, s.next_at ASC
       LIMIT 1 FOR UPDATE SKIP LOCKED)
     RETURNING *`, [startOfBusinessDay(), settings.perEmployerPerDay]);
 }
