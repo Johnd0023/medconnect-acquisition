@@ -505,6 +505,11 @@ async function renderSettings() {
     ${num("s-threshold", "threshold", s.threshold, "Auto-approve score", "Used only when supervised launch is off.", 0, 100)}
   </div></section>
 
+  <section class="card"><div class="ch"><h2>Open and click tracking</h2><span class="sub">Feeds the open and click numbers on Performance</span></div><div class="cb form">
+    ${sw("s-trko", "tracking.opens", s.tracking?.opens !== false, "Track opens", "Adds an invisible 1-pixel image to each email. Some spam filters count tracking images against you. Off: open rates stop updating.")}
+    ${sw("s-trkc", "tracking.clicks", s.tracking?.clicks !== false, "Track brochure clicks", "Records who clicks the brochure link. Off: the link still works, clicks just aren't counted.")}
+    <span class="hint" style="grid-column:1/-1">Both point to this app's web address (${esc(location.host)}). Until it's on your own domain (app.medconnectstaffing.com), turning both off is the safer choice while you rebuild your sending reputation. Replies, bounces and opt-outs are tracked either way.</span>
+  </div></section>
   <section class="card"><div class="ch"><h2>Daily schedule</h2><span class="sub">${esc(I.timezone)}</span></div><div class="cb form">
     ${time("s-dt", "discoveryTime", s.discoveryTime, "Discovery runs at")}
     <div class="field"><span style="font-weight:500;font-size:13px">Discovery days</span>${days("discoveryDays")}</div>
