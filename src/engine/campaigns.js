@@ -258,12 +258,16 @@ export async function campaignBoard(campaignId) {
 }
 
 /** How many people need the owner's decision (nav badge). */
+let pendingCache = { at: 0, n: 0 };
 export async function pendingCount() {
+  if (Date.now() - pendingCache.at < 120000) return pendingCache.n; // the nav badge doesn't need to rescan every page load
   const camp = await getCampaign('commonspirit');
   if (!camp) return 0;
   const b = await campaignBoard(camp.id);
-  return b.counts.review + b.counts.followup;
+  pendingCache = { at: Date.now(), n: b.counts.review + b.counts.followup };
+  return pendingCache.n;
 }
+export function setPendingFromBoard(b) { pendingCache = { at: Date.now(), n: b.counts.review + b.counts.followup }; }
 
 /* ---------------- Outlook history ---------------- */
 

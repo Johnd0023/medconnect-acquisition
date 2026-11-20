@@ -92,8 +92,36 @@ export const routes = {
     const camp = await campaigns.getCampaign(params.id);
     if (!camp) throw httpError(404, 'Campaign not found');
     const b = await campaigns.campaignBoard(camp.id);
+    campaigns.setPendingFromBoard(b);
     const outlookConn = await outlook.connection();
-    return { ...b, outlookConnected: outlookConn.connected, dryRun: cfg.dryRun };
+    const st = await getSettings();
+    return { ...b, outlookConnected: outlookConn.connected, dryRun: cfg.dryRun, gaps: [st.followupGap1Days, st.followupGap2Days], sendDays: st.sendDays, sendWindow: [st.sendWindowStart, st.sendWindowEnd] };
+  },
+  'POST /api/campaigns/:id/templatePreview': async ({ params, body }) => {
+    const camp = await campaigns.getCampaign(params.id);
+    const key = camp.templates[body.key] ? body.key : 'initial_opening';
+    const step = key === 'followup_1' ? 1 : key === 'followup_2' ? 2 : 0;
+    const templates = { ...camp.templates, [key]: { ...camp.templates[key], subject: String(body.subject ?? camp.templates[key].subject), body: String(body.body ?? camp.templates[key].body) } };
+    const s = await getSettings();
+    // A real person from the list when there is one, otherwise sample details
+    const b = await campaigns.campaignBoard(camp.id);
+    const real = b.rows.find((r) => r.openings.length && r.firstName) || b.rows.find((r) => r.openings.length) || null;
+    let emp; let contact; let openings; let sample;
+    if (real) {
+      emp = await one('SELECT * FROM employers WHERE id = $1', [real.employerId]);
+      contact = await one('SELECT * FROM contacts WHERE id = $1', [real.contactId]);
+      openings = await q('SELECT * FROM openings WHERE employer_id = $1', [emp.id]);
+      sample = `${contact.full_name || contact.email}, ${emp.name}`;
+    } else {
+      emp = { id: 0, name: 'Dignity Health St. Rose Dominican', city: 'Henderson', state: 'NV' };
+      contact = { email: 'amy.clem@dignityhealth.org', first_name: 'Amy' };
+      openings = [{ active: true, specialty: 'Hospitalist', role: 'Physician', city: 'Henderson', state: 'NV', posted_at: new Date().toISOString(), contact_email: 'amy.clem@dignityhealth.org' }];
+      sample = 'Amy Clem, Dignity Health St. Rose Dominican (sample)';
+    }
+    if (key === 'initial_general') openings = [];
+    const bro = await brochureFor(step, s, { lineOnly: true });
+    const m = compose({ ...emp, drafts: {} }, contact, openings, step, { ...s, templates }, bro, { client: camp.client });
+    return { subject: m.subject, html: m.html, missing: m.missing, attachment: m.attachment, sample };
   },
   'PUT /api/campaigns/:id': async ({ params, body }) => {
     const camp = await campaigns.getCampaign(params.id);
@@ -103,6 +131,7 @@ export const routes = {
     const family = String(body.family ?? camp.family).slice(0, 20000);
     if (!campaigns.parseFamily(family).names.length && !campaigns.parseFamily(family).domains.length) throw httpError(400, 'Add at least one entity name or domain.');
     const templates = { ...camp.templates };
+    if (body.resetTemplate && campaigns.COMMONSPIRIT_TEMPLATES[body.resetTemplate]) templates[body.resetTemplate] = campaigns.COMMONSPIRIT_TEMPLATES[body.resetTemplate];
     for (const [k, v] of Object.entries(body.templates || {})) if (templates[k]) templates[k] = { ...templates[k], subject: String(v.subject ?? templates[k].subject).slice(0, 300), body: String(v.body ?? templates[k].body).slice(0, 20000) };
     const settings = { ...camp.settings, ...(body.settings || {}) };
     settings.dailyLimit = Math.max(1, Math.min(200, Number(settings.dailyLimit) || 25));

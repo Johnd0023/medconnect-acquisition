@@ -635,7 +635,8 @@ const CSTAGES = [
   ["done", "Replied or finished", "Replied, stopped or finished."],
   ["skipped", "Skipped", "You chose not to email these people."],
   ["nocontact", "No direct contact", "Openings with only a PracticeMatch address."],
-  ["setup", "Emails & settings", "Templates, entities, daily limit."],
+  ["emails", "Email sequence", "Read and edit the 3 emails."],
+  ["setup", "Settings", "Entities, daily limit, approvals."],
 ];
 function campChecks(r) {
   const out = [];
@@ -675,14 +676,14 @@ async function loadCampPreview() {
   try { P.data = await api(`/api/campaigns/${ui.campId}/preview?email=${encodeURIComponent(P.email)}&step=${P.step}`); } catch (e) { toast(e.message, true); ui.camp.preview = null; }
 }
 async function renderCampaign() {
-  const d = await api("/api/campaigns/commonspirit");
+  const d = (ui.campPre && await ui.campPre) || await api("/api/campaigns/commonspirit"); ui.campPre = null;
   ui.campId = d.campaign.id;
   const C = (ui.camp ||= { tab: "review", sel: new Set(), fsel: new Set(), q: "", lim: 50, preview: null });
   if (C.preview && !C.preview.data) await loadCampPreview();
   const camp = d.campaign; const cnt = d.counts;
   const qq = C.q.trim().toLowerCase();
   const rows = d.rows.filter((r) => r.stage === C.tab && (!qq || [r.name, r.email, r.entity, r.title, ...r.openings.map((o) => `${o.specialty} ${o.role} ${o.city} ${o.state}`)].join(" ").toLowerCase().includes(qq)));
-  const tiles = CSTAGES.map(([k, l, s]) => `<button class="kpi" data-ctab="${k}" aria-pressed="${C.tab === k}" style="text-align:left;cursor:pointer;font:inherit;${C.tab === k ? "outline:2px solid var(--accent);" : ""}"><span class="l">${l}</span><span class="v">${k === "setup" ? "⚙" : cnt[k] ?? 0}</span><span class="s">${s}</span></button>`).join("");
+  const tiles = CSTAGES.map(([k, l, s]) => `<button class="kpi" data-ctab="${k}" aria-pressed="${C.tab === k}" style="text-align:left;cursor:pointer;font:inherit;${C.tab === k ? "outline:2px solid var(--accent);" : ""}"><span class="l">${l}</span><span class="v">${k === "setup" ? "⚙" : k === "emails" ? "✉" : cnt[k] ?? 0}</span><span class="s">${s}</span></button>`).join("");
   const warn = [!d.outlookConnected ? '<div class="banner" style="background:var(--warn-soft,#fff7e6);border:1px solid #f3d9a4;border-radius:10px;padding:10px 14px">Outlook isn\'t connected, so earlier emails can\'t be checked. Connect it in Settings → Integrations.</div>' : "",
     !camp.active ? '<div style="background:#fdecec;border:1px solid #f5c2c2;border-radius:10px;padding:10px 14px"><b>Campaign paused.</b> Approved emails wait here until you resume it.</div>' : ""].join("");
   let body = "";
@@ -712,6 +713,24 @@ async function renderCampaign() {
     body = `<section class="card"><div class="ch"><h2>Openings with no direct contact · ${d.noContact.length}</h2><span class="sub">These postings only list a PracticeMatch address, which is never emailed. Find the recruiter with Lusha or add one by hand.</span></div>${d.noContact.length ? `<div class="tablewrap"><table class="ctable"><colgroup><col style="width:30%"><col><col style="width:190px"></colgroup><tbody>${d.noContact.map((e) => `<tr><td><b>${esc(e.entity)}</b>${e.matchedAs !== e.entity ? `<div class="sub">${esc(e.matchedAs)}</div>` : ""}<div class="sub">${esc([e.city, e.state].filter(Boolean).join(", "))}${e.domain ? ` · ${esc(e.domain)}` : ""}</div></td>
       <td>${e.openings.map((o) => `<div class="sm">${esc([o.specialty, o.role].filter(Boolean).join(" "))} · ${esc([o.city, o.state].filter(Boolean).join(", "))} · ${fmtShort(o.postedAt)}${o.code ? ` · <span class="mono">${esc(o.code)}</span>` : ""}</div>`).join("")}${e.openingCount > 4 ? `<div class="sub">+${e.openingCount - 4} more</div>` : ""}</td>
       <td><div class="actions" style="flex-direction:column;align-items:stretch"><button class="btn sm primary" data-emp="${e.employerId}" data-a="enrich">Find contacts with Lusha</button><button class="btn sm" data-copen="${e.employerId}">Add a contact by hand</button></div></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Every open posting has a direct contact.</div>'}</section>`;
+  } else if (C.tab === "emails") {
+    const T = camp.templates; const k = C.tpl || "initial_opening"; const t = T[k];
+    const days = (n) => `${n} send day${n === 1 ? "" : "s"}`;
+    const steps = [
+      ["1", "Initial email", "Sent when you approve the person (inside your send window).", ["initial_opening", "initial_general"]],
+      ["2", "Follow-up 1", `${days(d.gaps[0])} after the initial email, as a reply in the same Outlook thread.${camp.settings.approveFollowUps ? " Waits for your OK." : ""}`, ["followup_1"]],
+      ["3", "Follow-up 2", `${days(d.gaps[1])} after follow-up 1, same thread. The last email.${camp.settings.approveFollowUps ? " Waits for your OK." : ""}`, ["followup_2"]],
+    ];
+    body = `<section class="card"><div class="ch"><h2>The sequence</h2><span class="sub">A reply, opt-out or bounce stops it right away. Out-of-office replies push the next email out 7 days.</span></div>
+      <div class="cb" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">${steps.map(([n, l, when, keys]) => `<button class="kpi" data-ctpl="${keys[0]}" style="text-align:left;cursor:pointer;font:inherit;${keys.includes(k) ? "outline:2px solid var(--accent);" : ""}"><span class="l">Step ${n}</span><span style="font-weight:600;font-size:16px">${l}</span><span class="s">${when}</span>${keys.length > 1 ? `<span class="s">Two versions: one when they have an opening on file, one when they don't.</span>` : ""}</button>`).join("")}</div></section>
+      <section class="card"><div class="ch"><h2>Edit email</h2><div class="tabs">${["initial_opening", "initial_general", "followup_1", "followup_2"].map((x) => `<button class="tab" data-ctpl="${x}" aria-pressed="${x === k}">${esc(T[x].label)}</button>`).join("")}</div></div>
+      <div class="cb tpl-grid"><div style="display:flex;flex-direction:column;gap:10px;min-width:0">
+        <div class="field"><label for="ctpl-subject">Subject${k.startsWith("followup") ? " (follow-ups reply in the original thread, so this is only used if that thread can't be found)" : ""}</label><input type="text" id="ctpl-subject" data-ctplf="subject" value="${esc(t.subject)}"></div>
+        <div class="field"><label for="ctpl-body">Body</label><textarea id="ctpl-body" data-ctplf="body" class="prose" style="min-height:460px">${esc(t.body)}</textarea><span class="hint">Saves when you click outside the box. Fields: {{first_name}} {{client}} (${esc(camp.client)}) {{employer}} (the entity) {{role}} {{specialty}} {{city}} {{state}} {{more_openings}} {{signal_line}} {{sender_name}} {{brochure}}. Lines starting with "- " become bullet points. Your signature and P.S. are added automatically. To change one person's email only, use Preview email on their row.</span></div>
+        <div class="actions"><button class="btn sm" data-cact="resetTpl">Restore default</button></div>
+      </div>
+      <div class="field" style="min-width:0"><label>Preview <span class="sub" style="font-weight:400" id="ctpl-sample">· loading…</span></label><div class="email rich" id="ctpl-preview" style="white-space:normal;background:#fff;max-height:640px;overflow:auto"><span class="sub">Loading preview…</span></div></div>
+      </div></section>`;
   } else {
     const T = camp.templates;
     body = `<section class="card"><div class="ch"><h2>Campaign settings</h2></div><div class="cb form">
@@ -721,11 +740,7 @@ async function renderCampaign() {
       <div class="field"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="cs-appf" ${camp.settings.approveFollowUps ? "checked" : ""} style="width:auto"> Approve each follow-up too</label><span class="hint">On: each follow-up waits for your OK when it's due. Off: approving someone approves all 3 emails.</span></div>
       <div class="field" style="grid-column:1/-1"><label for="cs-family">${esc(camp.client)} entities, one per line: <span class="mono">Name | domain.com</span>. End a name with <span class="mono">*</span> to match names that start with it.</label><textarea id="cs-family" style="min-height:260px">${esc(camp.family)}</textarea><span class="hint">${d.entities} employer records in your database match today. Anyone at these names or email domains shows up in To review, including clients that are protected or suppressed for prospecting.</span></div>
     </div></section>
-    ${["initial_opening", "initial_general", "followup_1", "followup_2"].map((k) => `<section class="card"><div class="ch"><h2>${esc(T[k].label)}</h2></div><div class="cb form">
-      ${k.startsWith("initial") ? `<div class="field" style="grid-column:1/-1"><label for="ct-${k}-s">Subject</label><input type="text" id="ct-${k}-s" value="${esc(T[k].subject)}"></div>` : ""}
-      <div class="field" style="grid-column:1/-1"><label for="ct-${k}-b">Body</label><textarea id="ct-${k}-b" class="prose" style="min-height:300px">${esc(T[k].body)}</textarea></div></div></section>`).join("")}
-    <div class="hint">Fields: {{first_name}} {{client}} {{employer}} (the entity) {{role}} {{specialty}} {{city}} {{state}} {{more_openings}} {{signal_line}} {{sender_name}} {{brochure}}. Your signature and P.S. are added automatically. Follow-ups reply in the same thread, so they keep the first subject.</div>
-    <div class="actions"><button class="btn primary" data-cact="saveSetup">Save campaign</button></div>`;
+    <div class="actions"><button class="btn primary" data-cact="saveSetup">Save settings</button></div>`;
   }
   return `<div class="head"><div><h1>${esc(camp.name)}</h1><p>Recruiters and hiring contacts at ${esc(camp.client)} and its entities. This runs separately from prospect outreach, where these clients stay protected. Nothing sends until you approve that email, and right before each one goes out, Outlook is searched again for any email with that person since you approved.</p></div>
     <div class="actions"><span class="sub">${d.sentToday} of ${camp.settings.dailyLimit} campaign emails today${d.dryRun ? " (dry run)" : ""}</span><span class="pill ${camp.active ? "p-good" : "p-bad"}">${camp.active ? "Active" : "Paused"}</span><button class="btn" data-cact="toggle">${camp.active ? "Pause campaign" : "Resume campaign"}</button><button class="btn" data-cact="checkAll" ${d.outlookConnected ? "" : "disabled"}>Check Outlook for everyone</button></div></div>
@@ -739,6 +754,7 @@ async function campaignClick(t) {
   const tab = t.closest("[data-ctab]"); if (tab) { C.tab = tab.dataset.ctab; C.sel.clear(); C.fsel.clear(); C.preview = null; C.lim = 50; renderAll(); return true; }
   const pv = t.closest("[data-cprev]");
   if (pv) { const step = Number(pv.dataset.step); if (C.preview?.email === pv.dataset.cprev && C.preview.step === step && !pv.closest(".tabs")) C.preview = null; else C.preview = { email: pv.dataset.cprev, step, data: null }; renderAll(); return true; }
+  const tp = t.closest("[data-ctpl]"); if (tp) { C.tpl = tp.dataset.ctpl; renderAll(); return true; }
   const op = t.closest("[data-copen]"); if (op) { ui.drawer = Number(op.dataset.copen); renderDrawer(); return true; }
   const st = t.closest("[data-cstop]"); if (st) { if (!confirm("Stop this person's campaign emails?")) return true; act(api(`/api/campaigns/${id}/stop`, { method: "POST", body: { seqId: Number(st.dataset.cstop) } })); return true; }
   const un = t.closest("[data-cunskip]"); if (un) { act(api(`/api/campaigns/${id}/unskip`, { method: "POST", body: { emails: [un.dataset.cunskip] } })); return true; }
@@ -756,6 +772,7 @@ async function campaignClick(t) {
     case "approveF": a.disabled = true; await act(api(`/api/campaigns/${id}/approveFollowUps`, { method: "POST", body: { seqIds: [...C.fsel] } })); C.fsel.clear(); return true;
     case "toggle": act(api(`/api/campaigns/${id}`, { method: "PUT", body: { active: !/Pause/.test(a.textContent) ? true : false } })); return true;
     case "more": C.lim += 50; renderAll(); return true;
+    case "resetTpl": if (!confirm("Restore this email to the original wording?")) return true; await act(api(`/api/campaigns/${id}`, { method: "PUT", body: { resetTemplate: C.tpl || "initial_opening" } }), "Restored"); return true;
     case "closePreview": C.preview = null; renderAll(); return true;
     case "edit": C.preview.editing = true; renderAll(); return true;
     case "cancelEdit": C.preview.editing = false; renderAll(); return true;
@@ -763,16 +780,24 @@ async function campaignClick(t) {
     case "resetDraft": { const P = C.preview; await act(api(`/api/campaigns/${id}/draft`, { method: "DELETE", body: { email: P.email, step: P.step } })); P.data = null; renderAll(); return true; }
     case "saveSetup": {
       const v = (x) => document.getElementById(x)?.value;
-      const templates = {};
-      for (const k of ["initial_opening", "initial_general", "followup_1", "followup_2"]) templates[k] = { body: v(`ct-${k}-b`), ...(k.startsWith("initial") ? { subject: v(`ct-${k}-s`) } : {}) };
-      act(api(`/api/campaigns/${id}`, { method: "PUT", body: { name: v("cs-name"), client: v("cs-client"), family: v("cs-family"), templates, settings: { dailyLimit: Number(v("cs-limit")), approveFollowUps: document.getElementById("cs-appf").checked } } }));
+      act(api(`/api/campaigns/${id}`, { method: "PUT", body: { name: v("cs-name"), client: v("cs-client"), family: v("cs-family"), settings: { dailyLimit: Number(v("cs-limit")), approveFollowUps: document.getElementById("cs-appf").checked } } }));
       return true;
     }
   }
   return false;
 }
+let campPrevTimer;
+async function campTemplatePreview() {
+  const box = document.getElementById("ctpl-preview"); if (!box || !ui.camp) return;
+  try {
+    const r = await api(`/api/campaigns/${ui.campId}/templatePreview`, { method: "POST", body: { key: ui.camp.tpl || "initial_opening", subject: document.getElementById("ctpl-subject")?.value, body: document.getElementById("ctpl-body")?.value } });
+    box.innerHTML = `<div class="subj" style="font-weight:600;margin-bottom:8px">${esc(r.subject)}</div>${r.html}${r.attachment ? `<div class="sub" style="margin-top:8px">📎 ${esc(r.attachment)}</div>` : ""}${r.missing.length ? `<div style="margin-top:10px"><span class="pill p-warn">Would pause: missing ${esc(r.missing.join(", "))}</span></div>` : ""}`;
+    const sm = document.getElementById("ctpl-sample"); if (sm) sm.textContent = `· as ${r.sample} would see it`;
+  } catch (e) { box.innerHTML = `<span class="pill p-bad">Preview failed</span> ${esc(e.message)}`; }
+}
 function campaignChange(t) {
   const C = ui.camp; if (!C) return false;
+  if (t.dataset.ctplf) { const key = C.tpl || "initial_opening"; api(`/api/campaigns/${ui.campId}`, { method: "PUT", body: { templates: { [key]: { [t.dataset.ctplf]: t.value } } } }).then(() => toast("Saved")).catch((e) => toast(e.message, true)); return true; }
   const upd = () => { for (const [idn, n, l] of [["camp-approve", C.sel.size, "Approve selected"], ["camp-approvef", C.fsel.size, "Approve selected follow-ups"]]) { const b = document.getElementById(idn); if (b) { b.disabled = !n; b.textContent = `${l} (${n})`; } } for (const idn of ["camp-skip", "camp-check"]) { const b = document.getElementById(idn); if (b) b.disabled = !C.sel.size; } };
   if (t.dataset.csel !== undefined) { t.checked ? C.sel.add(t.dataset.csel) : C.sel.delete(t.dataset.csel); upd(); return true; }
   if (t.dataset.fsel !== undefined) { t.checked ? C.fsel.add(Number(t.dataset.fsel)) : C.fsel.delete(Number(t.dataset.fsel)); upd(); return true; }
@@ -885,7 +910,9 @@ async function renderDrawer() {
 /* ---------------- render loop ---------------- */
 async function renderAll() {
   try {
+    const pre = view() === "campaign" ? api("/api/campaigns/commonspirit").catch(() => null) : null;
     ui.overview = await api("/api/overview");
+    ui.campPre = pre;
     await renderNav();
     const v = view();
     const html = await ({ today: renderToday, queue: renderQueue, outreach: renderOutreach, responses: renderResponses, campaign: renderCampaign, optouts: renderOptouts, contacts: renderContacts, performance: renderPerformance, settings: renderSettings })[v]();
@@ -894,6 +921,7 @@ async function renderAll() {
     m.innerHTML = html;
     if (focusId === "qsearch" || focusId === "cq" || focusId === "ooq" || focusId === "campq") { const el = document.getElementById(focusId); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch {} } }
     if (v === "settings") { await fillBookmarklet(); previewTemplate(); }
+    if (v === "campaign" && ui.camp?.tab === "emails") campTemplatePreview();
     await renderDrawer();
   } catch (e) { toast(e.message, true); }
 }
@@ -1067,6 +1095,7 @@ document.addEventListener("change", async (ev) => {
 document.addEventListener("input", (ev) => {
   if (ev.target.id === "qsearch") { clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
   if (ev.target.id === "ooq") { ui.oo = { ...(ui.oo || { kind: "opt" }), q: ev.target.value }; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
+  if (ev.target.id === "ctpl-body" || ev.target.id === "ctpl-subject") { clearTimeout(campPrevTimer); campPrevTimer = setTimeout(campTemplatePreview, 400); }
   if (ev.target.id === "campq") { ui.camp.q = ev.target.value; ui.camp.lim = 50; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
   if (ev.target.id === "cq") { ui.cf.q = ev.target.value; ui.cpage = 0; clearTimeout(saveTimer); saveTimer = setTimeout(renderAll, 350); }
   if (ev.target.id === "tpl-body" || ev.target.id === "tpl-subject") { clearTimeout(previewTimer); previewTimer = setTimeout(previewTemplate, 400); }
