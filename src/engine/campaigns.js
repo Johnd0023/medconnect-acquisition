@@ -156,6 +156,20 @@ export function familyMatch({ employer, contacts = [], openings = [] }, fam) {
   return null;
 }
 
+export const isClientEmail = (email, fam) => Boolean(email && !isRelay(email) && domainHit(emailDomain(email), fam));
+/** A company address that isn't the client's (free mail and the employer's own website domain don't count). */
+export function isOtherCompanyEmail(email, fam, employer) {
+  if (!email || isRelay(email) || isFreeMail(email) || isClientEmail(email, fam)) return false;
+  const d = emailDomain(email);
+  return !(employer?.domain && (d === normDomain(employer.domain) || d.endsWith('.' + normDomain(employer.domain))));
+}
+/** Is this person, at this employer, someone the campaign may email as the client's staff? */
+export function eligibleForCampaign(contact, employer, openings, fam) {
+  if (!contact?.email || isRelay(contact.email)) return false;
+  if (isClientEmail(contact.email, fam)) return true;
+  return Boolean(familyMatch({ employer }, fam)) && !isOtherCompanyEmail(contact.email, fam, employer);
+}
+
 /** Protected-account context with the campaign client's own entries removed (so only OTHER protected clients block). */
 export async function otherProtectedContext(fam) {
   const ctx = await loadContext();
@@ -177,10 +191,14 @@ async function familyEmployers(fam) {
   const out = [];
   for (const e of emps) {
     const os = oBy.get(e.id) || []; const cs = cBy.get(e.id) || [];
-    const entity = familyMatch({ employer: e }, fam) || familyMatch({ openings: os }, fam);
-    // A contact with a client email domain counts even when filed under an unrelated employer name
-    const domainContacts = entity ? cs : cs.filter((c) => familyMatch({ contacts: [c] }, fam));
-    if (entity || domainContacts.length) out.push({ employer: e, entity: entity || familyMatch({ contacts: domainContacts }, fam), openings: os, contacts: domainContacts });
+    const named = familyMatch({ employer: e }, fam);
+    const entity = named || familyMatch({ openings: os }, fam);
+    // Who counts as the client's own staff:
+    //  - employer record named for the client: everyone there (a non-client email domain is flagged for review)
+    //  - only a posting mentions the client (e.g. SCP Health or Sound Physicians recruiting FOR a CHI hospital):
+    //    only people with a client email address. Vendors and staffing firms are never emailed as the client.
+    const people = cs.filter((c) => isClientEmail(c.email, fam) || (named && !isOtherCompanyEmail(c.email, fam, e)));
+    if (people.length || (entity && os.some((o) => o.active))) out.push({ employer: e, entity: entity || familyMatch({ contacts: people }, fam), openings: os, contacts: people, named: Boolean(named) });
   }
   return out;
 }
@@ -211,7 +229,7 @@ export async function campaignBoard(campaignId) {
       const mine = active.filter((o) => (o.contact_email || '').toLowerCase() === email);
       const ops = (mine.length ? mine : active).sort((a, b) => new Date(b.posted_at || b.first_seen) - new Date(a.posted_at || a.first_seen));
       const row = people.get(email) || { email, contactId: c.id, employerId: g.employer.id, name: c.full_name, firstName: c.first_name, title: c.title, sources: c.sources,
-        entity: g.employer.name, matchedAs: g.entity, openings: [], otherEntities: [], freeMail: isFreeMail(email) };
+        entity: g.employer.name, matchedAs: g.entity, openings: [], otherEntities: [], freeMail: isFreeMail(email), clientEmail: isClientEmail(email, fam) };
       if (people.has(email) && row.employerId !== g.employer.id) {
         // Same recruiter posting for several entities: keep the one with the most recent opening as the main record
         const newer = ops[0] && (!row.openings[0] || new Date(ops[0].posted_at || ops[0].first_seen) > new Date(row.openings[0].postedAt || 0));
@@ -236,6 +254,14 @@ export async function campaignBoard(campaignId) {
   const reps = emails.length ? await q(`SELECT lower(from_email) AS email, max(received_at) AS at, (array_agg(category ORDER BY received_at DESC))[1] AS category FROM replies WHERE lower(from_email) = ANY($1) GROUP BY 1`, [emails]) : [];
   const repBy = new Map(reps.map((r) => [r.email, r]));
 
+  // Approved earlier but not the client's own staff (vendor recruiters): stop before anything goes out
+  for (const s of seqs) {
+    if (['active', 'paused'].includes(s.status) && !people.has(s.email.toLowerCase()) && !ctx.suppressedEmails.has(s.email.toLowerCase())) {
+      await q(`UPDATE sequences SET status = 'stopped', stop_reason = $2, claimed_at = NULL WHERE id = $1`, [s.id, `${s.email} isn't a ${camp.client} address (a posting for a ${camp.client} hospital, from another company)`]);
+      await logEvent(s.employer_id, `${camp.name}: stopped ${s.email}, not a ${camp.client} address`);
+      s.status = 'stopped';
+    }
+  }
   const rows = [...people.values()].map((p) => {
     const d = decisions.get(p.email); const s = seqBy.get(p.email);
     let stage = 'review';
@@ -247,7 +273,7 @@ export async function campaignBoard(campaignId) {
     } else if (d?.decision === 'skipped') stage = 'skipped';
     return { ...p, stage, decisionNote: d?.note || null, outlook: d?.outlook || null, checkedAt: d?.checked_at || null, edited: Object.keys(d?.drafts || {}).filter((k) => d.drafts[k]?.body),
       appEmailed: priorBy.get(p.email) || null, replied: repBy.get(p.email) || null,
-      seq: s ? { id: s.id, step: s.step, maxSteps: s.max_steps, status: s.status, nextAt: s.next_at, approvedStep: s.approved_step, stopReason: s.stop_reason, holdNote: s.hold_note, lastSent: s.last_sent, replied: s.replied } : null };
+      seq: s ? { id: s.id, step: s.step, maxSteps: s.max_steps, editing: s.editing, status: s.status, nextAt: s.next_at, approvedStep: s.approved_step, stopReason: s.stop_reason, holdNote: s.hold_note, lastSent: s.last_sent, replied: s.replied } : null };
   }).sort((a, b) => new Date(b.openings[0]?.postedAt || 0) - new Date(a.openings[0]?.postedAt || 0) || a.entity.localeCompare(b.entity));
   noContact.sort((a, b) => new Date(b.openings[0]?.postedAt || 0) - new Date(a.openings[0]?.postedAt || 0));
   const counts = { review: 0, followup: 0, queued: 0, sequence: 0, done: 0, skipped: 0 };
@@ -341,6 +367,16 @@ export async function setSteps(campaignId, seqId, steps) {
   }
   await logEvent(s.employer_id, `Campaign emails for this contact set to ${max === 1 ? 'initial only' : max === 2 ? 'initial + follow-up 1' : 'all 3'}`);
   return max;
+}
+
+/** Hold one person's next email while the owner edits it (nothing sends until editing ends). */
+export async function setEditing(campaignId, seqId, on) {
+  const s = await one(`UPDATE sequences SET editing = $3, claimed_at = CASE WHEN $3 THEN claimed_at ELSE NULL END
+                       WHERE id = $1 AND campaign_id = $2 AND status IN ('active','paused') RETURNING *`, [seqId, campaignId, Boolean(on)]);
+  if (!s) throw new Error('This email has already gone out or the sequence ended.');
+  const sent = await one(`SELECT 1 FROM messages WHERE sequence_id = $1 AND step = $2 AND status = 'sent'`, [s.id, s.step]);
+  if (on && sent) { await q('UPDATE sequences SET editing = false WHERE id = $1', [s.id]); throw new Error('That email has already been sent.'); }
+  return s;
 }
 
 export async function setDecision(campaignId, emails, decision, note = null) {

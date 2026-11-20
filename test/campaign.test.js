@@ -158,3 +158,31 @@ test('initial only, then extend', async () => {
   await routes['POST /api/campaigns/:id/steps']({ params: { id: String(camp.id) }, body: { seqId: s.id, steps: 1 } });
   assert.equal((await one(`SELECT status FROM sequences WHERE id = $1`, [s.id])).status, 'completed');
 });
+
+test('vendor recruiters excluded; editing pauses a queued email', async () => {
+  const { q, one } = await import('../src/db.js');
+  const { sendTick } = await import('../src/engine/outreach.js');
+  const { routes } = await import('../src/api.js');
+  const camp = await one(`SELECT id FROM campaigns WHERE slug = 'commonspirit'`);
+  await q(`UPDATE sequences SET status = 'stopped' WHERE status IN ('active','paused')`);
+  await q(`DELETE FROM messages`); await q(`DELETE FROM campaign_contacts`); await q(`DELETE FROM sequences WHERE campaign_id IS NOT NULL`);
+  // SCP Health recruiter posting for a CHI hospital, filed under a non-CommonSpirit employer name
+  const e = await one(`INSERT INTO employers (name, norm_name, type) VALUES ('ProHealth Waukesha Memorial Hospital-ISV','prohealth waukesha memorial hospital isv','Hospital / health system') RETURNING id`);
+  const c = await one(`INSERT INTO contacts (employer_id, first_name, full_name, email) VALUES ($1,'Chase','Chase Allred','chase_allred@scphealth.com') RETURNING id`, [e.id]);
+  await q(`INSERT INTO openings (employer_id, source, external_id, role, specialty, city, state, active, posted_at, contact_email, raw) VALUES ($1,'PM','scp1','Nurse Practitioner','Emergency Medicine','Baton Rouge','LA',true, now(),'chase_allred@scphealth.com','{"employer":"CHI St. Vincent"}'::jsonb)`, [e.id]);
+  // ...even if it had been approved before this rule existed
+  await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status, campaign_id, approved_step) VALUES ($1,$2,0, now(),'active',$3,0)`, [e.id, c.id, camp.id]);
+  const b = await routes['GET /api/campaigns/:id']({ params: { id: 'commonspirit' } });
+  assert.ok(!b.rows.some((r) => r.email === 'chase_allred@scphealth.com' && r.stage !== 'done'), 'not offered as a CommonSpirit contact');
+  assert.equal((await one(`SELECT status FROM sequences WHERE contact_id = $1`, [c.id])).status, 'stopped');
+
+  // Edit pauses; save resumes
+  await routes['POST /api/campaigns/:id/approve']({ params: { id: String(camp.id) }, body: { emails: ['amy.lee@dignityhealth.org'] } });
+  const s = await one(`SELECT s.id FROM sequences s JOIN contacts c ON c.id = s.contact_id WHERE c.email = 'amy.lee@dignityhealth.org' AND s.status = 'active'`);
+  await routes['POST /api/campaigns/:id/editing']({ params: { id: String(camp.id) }, body: { seqId: s.id, on: true } });
+  assert.equal((await sendTick({ force: true })).reason, 'Nothing due', 'held while editing');
+  await routes['PUT /api/campaigns/:id/draft']({ params: { id: String(camp.id) }, body: { email: 'amy.lee@dignityhealth.org', step: 0, subject: 'Quick question, Amy', body: 'Hi {{first_name}},\n\nEdited.' } });
+  await routes['POST /api/campaigns/:id/editing']({ params: { id: String(camp.id) }, body: { seqId: s.id, on: false } });
+  const r = await sendTick({ force: true });
+  assert.equal(r.subject, 'Quick question, Amy');
+});

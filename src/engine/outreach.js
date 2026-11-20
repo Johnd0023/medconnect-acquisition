@@ -5,7 +5,7 @@ import { cfg } from '../config.js';
 import { getSettings } from '../settings.js';
 import { loadContext, requalify, protectedRecipientMatch } from './qualify.js';
 import { compose } from './compose.js';
-import { getCampaign, parseFamily, familyMatch, otherProtectedContext, checkOutlook, composeInputs } from './campaigns.js';
+import { getCampaign, parseFamily, eligibleForCampaign, otherProtectedContext, checkOutlook, composeInputs } from './campaigns.js';
 import { brochureFor } from '../brochure.js';
 import { instrument, newToken } from '../tracking.js';
 import * as outlook from '../integrations/outlook.js';
@@ -146,6 +146,7 @@ async function claimNext(settings) {
       SELECT s.id FROM sequences s
       WHERE s.status = 'active' AND s.next_at <= now()
         AND (s.claimed_at IS NULL OR s.claimed_at < now() - interval '10 minutes')
+        AND NOT s.editing
         AND (SELECT count(*) FROM messages m WHERE m.employer_id = s.employer_id AND m.sent_at >= $1) < $2
         AND (s.campaign_id IS NULL OR (s.approved_step >= s.step AND EXISTS (SELECT 1 FROM campaigns c WHERE c.id = s.campaign_id AND c.active
              AND (SELECT count(*) FROM messages m2 JOIN sequences s2 ON s2.id = m2.sequence_id WHERE s2.campaign_id = c.id AND m2.status IN ('sent','dry_run') AND m2.sent_at >= $1)
@@ -273,6 +274,10 @@ async function deliver({ seq, emp, contact, recipients, m, attachments, s, ctx, 
 async function campaignSend(seq, s) {
   const camp = await getCampaign(seq.campaign_id);
   const fam = parseFamily(camp.family);
+  if ((await one('SELECT editing FROM sequences WHERE id = $1', [seq.id]))?.editing) {
+    await q('UPDATE sequences SET claimed_at = NULL WHERE id = $1', [seq.id]);
+    return { sent: false, reason: 'Paused while you edit' };
+  }
   const ctx = await loadContext();
   const emp = await one('SELECT * FROM employers WHERE id = $1', [seq.employer_id]);
   const [openings, contacts] = await Promise.all([
@@ -282,7 +287,7 @@ async function campaignSend(seq, s) {
   if (!contact?.email || isRelay(contact.email)) return stop('No direct email address');
   const email = contact.email.toLowerCase();
   if (contact.bad || ctx.suppressedEmails.has(email) || ctx.suppressedDomains.has(email.split('@')[1])) return stop('Contact opted out, bounced, or was marked wrong');
-  if (!familyMatch({ employer: emp, contacts: [contact], openings }, fam)) return stop(`No longer matches ${camp.client}`);
+  if (!eligibleForCampaign(contact, emp, openings, fam)) return stop(`${email} isn't a ${camp.client} address (a posting for a ${camp.client} hospital, from another company)`);
   const other = protectedRecipientMatch({ employer: emp, contacts: [contact], openings }, await otherProtectedContext(fam));
   if (other) { await logEvent(emp.id, `${camp.name} email to ${email} BLOCKED: also matches protected client "${other}"`); return stop(`Blocked: also matches protected client "${other}"`); }
   if (!cfg.dryRun) {

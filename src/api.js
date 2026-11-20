@@ -150,6 +150,10 @@ export const routes = {
     const r = await campaigns.approvePeople(params.id, emails, steps);
     return { ok: true, message: `${r.queued} approved and queued${r.skipped.length ? `. Not queued: ${r.skipped.join('; ')}` : ''}.` };
   },
+  'POST /api/campaigns/:id/editing': async ({ params, body }) => {
+    const s = await campaigns.setEditing(Number(params.id), Number(body.seqId), body.on !== false);
+    return { ok: true, step: s.step, message: body.on !== false ? 'Paused: this email won\'t send until you save or cancel.' : 'Resumed: it will send in its turn.' };
+  },
   'POST /api/campaigns/:id/steps': async ({ params, body }) => {
     const n = await campaigns.setSteps(Number(params.id), Number(body.seqId), Number(body.steps));
     return { ok: true, message: n === 1 ? 'Initial email only.' : n === 2 ? 'Initial email + follow-up 1.' : 'All 3 emails.' };

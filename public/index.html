@@ -651,12 +651,18 @@ function campChecks(r) {
   if (!r.checkedAt) out.push('<span class="pill p-mute">Outlook not checked</span>');
   else if (r.outlook?.total) out.push(`<span class="pill p-warn">${r.outlook.total} email${r.outlook.total === 1 ? "" : "s"} in Outlook</span><div class="sub">Last ${fmtShort(r.outlook.last.at)} ${esc(r.outlook.last.direction)}: “${esc((r.outlook.last.subject || "").slice(0, 70))}”</div>`);
   else out.push('<span class="pill p-good">No Outlook history</span>');
+  if (!r.clientEmail && !r.freeMail) out.push(`<div><span class="pill p-warn">Not a ${esc((ui.campClient || "client").split(" ")[0])} email address</span></div>`);
+  else if (r.freeMail) out.push('<div><span class="pill p-warn">Personal email address</span></div>');
   if (r.appEmailed) out.push(`<div><span class="pill p-warn">Prospect email sent ${fmtShort(r.appEmailed.at)}</span></div>`);
   if (r.replied) out.push(`<div><span class="pill ${CAT_PILL[r.replied.category] || "p-info"}">Replied ${fmtShort(r.replied.at)}: ${esc(CAT_LABEL[r.replied.category] || "reply")}</span></div>`);
   if (r.seq?.holdNote) out.push(`<div class="sub" style="color:var(--warn)">${esc(r.seq.holdNote)}</div>`);
   if (r.decisionNote) out.push(`<div class="sub">Note: ${esc(r.decisionNote)}</div>`);
   if (r.edited.length) out.push(`<div class="sub">✎ Edited for this person</div>`);
   return out.join("");
+}
+function editBtn(r) {
+  return r.seq.editing ? `<button class="btn sm primary" data-cedit="${r.seq.id}" data-email="${esc(r.email)}">Continue editing</button><button class="btn sm" data-cresume="${r.seq.id}">Resume, no changes</button>`
+    : `<button class="btn sm" data-cedit="${r.seq.id}" data-email="${esc(r.email)}">Edit ${r.seq.step === 0 ? "email" : "follow-up " + r.seq.step}</button>`;
 }
 function stepOpts(sel) {
   return [[1, "Initial email only"], [2, "Initial + follow-up 1"], [3, "All 3 emails"]].map(([n, l]) => `<option value="${n}" ${Number(sel) === n ? "selected" : ""}>${l}</option>`).join("");
@@ -679,7 +685,7 @@ function campPreviewRow(r, cols) {
   let inner = '<div class="sub">Loading…</div>';
   if (D && P.editing) inner = `<div class="field"><label for="cd-subj">Subject${P.step > 0 ? " (follow-ups reply in the same thread)" : ""}</label><input type="text" id="cd-subj" value="${esc(D.draft.subject || "")}"></div>
       <div class="field"><label for="cd-body">Email</label><textarea id="cd-body" class="prose" style="min-height:300px">${esc(D.draft.body || "")}</textarea><span class="hint">Only for ${esc(r.email)}. Your signature and P.S. are added automatically.</span></div>
-      <div class="actions"><button class="btn sm primary" data-cact="saveDraft">Save for this person</button><button class="btn sm" data-cact="cancelEdit">Cancel</button></div>`;
+      <div class="actions"><button class="btn sm primary" data-cact="saveDraft">${P.seqId ? "Save and resume sending" : "Save for this person"}</button><button class="btn sm" data-cact="cancelEdit">${P.seqId ? "Cancel and resume" : "Cancel"}</button>${P.seqId ? '<span class="sub">Paused: this email won\'t send until you save or cancel.</span>' : ""}</div>`;
   else if (D) inner = `<div class="sub">To ${esc(D.to)}${D.edited ? " · edited for this person" : ""}</div><div class="email" style="white-space:normal;background:#fff"><div class="subj" style="font-weight:600;margin-bottom:8px">${esc(D.subject)}</div>${D.html}</div>
       ${D.missing.length ? `<div><span class="pill p-warn">Would pause: missing ${esc(D.missing.join(", "))}</span></div>` : ""}
       <div class="actions"><button class="btn sm" data-cact="edit">Edit for this person</button>${D.edited ? '<button class="btn sm" data-cact="resetDraft">Use the campaign template</button>' : ""}<button class="btn sm" data-cact="closePreview">Close</button></div>`;
@@ -691,7 +697,7 @@ async function loadCampPreview() {
 }
 async function renderCampaign() {
   const d = (ui.campPre && await ui.campPre) || await api("/api/campaigns/commonspirit"); ui.campPre = null;
-  ui.campId = d.campaign.id;
+  ui.campId = d.campaign.id; ui.campClient = d.campaign.client;
   const C = (ui.camp ||= { tab: "review", sel: new Set(), fsel: new Set(), q: "", lim: 50, preview: null });
   if (C.preview && !C.preview.data) await loadCampPreview();
   const camp = d.campaign; const cnt = d.counts;
@@ -717,11 +723,11 @@ async function renderCampaign() {
       ${rows.length ? `<div class="tablewrap"><table class="ctable"><colgroup><col style="width:38px"><col style="width:24%"><col style="width:30%"><col><col style="width:150px"></colgroup>
       <thead><tr><th><input type="checkbox" data-fselall aria-label="Select all" ${rows.every((r) => C.fsel.has(r.seq.id)) ? "checked" : ""}></th><th>Contact</th><th>Entity</th><th>Before you approve</th><th></th></tr></thead><tbody>
       ${rows.map((r) => `<tr><td><input type="checkbox" data-fsel="${r.seq.id}" aria-label="Select ${esc(r.name || r.email)}" ${C.fsel.has(r.seq.id) ? "checked" : ""}></td><td>${campWho(r)}<div class="sub">Follow-up ${r.seq.step} due · last email ${fmtShort(r.seq.lastSent)}</div>${seqStepsSelect(r)}</td><td>${campWhere(r)}</td><td>${campChecks(r)}</td>
-        <td><div class="actions" style="flex-direction:column;align-items:stretch"><button class="btn sm" data-cprev="${esc(r.email)}" data-step="${r.seq.step}">Preview follow-up</button><button class="btn sm danger" data-cstop="${r.seq.id}">Stop</button></div></td></tr>${campPreviewRow(r, 5)}`).join("")}</tbody></table></div>` : '<div class="empty">No follow-ups waiting for you.</div>'}</section>`;
+        <td><div class="actions" style="flex-direction:column;align-items:stretch"><button class="btn sm" data-cprev="${esc(r.email)}" data-step="${r.seq.step}">Preview follow-up</button>${editBtn(r)}<button class="btn sm danger" data-cstop="${r.seq.id}">Stop</button></div></td></tr>${campPreviewRow(r, 5)}`).join("")}</tbody></table></div>` : '<div class="empty">No follow-ups waiting for you.</div>'}</section>`;
   } else if (["queued", "sequence", "done"].includes(C.tab)) {
-    body = `<section class="card"><div class="ch"><h2>${CSTAGES.find((x) => x[0] === C.tab)[1]} · ${rows.length}</h2>${searchBox}</div>${rows.length ? `<div class="tablewrap"><table class="ctable"><colgroup><col style="width:26%"><col style="width:30%"><col><col style="width:110px"></colgroup><tbody>
-      ${rows.map((r) => `<tr><td>${campWho(r)}</td><td>${campWhere(r)}</td><td class="sm">${r.seq.status === "active" ? (r.seq.step === 0 ? `Initial email approved, waiting to send` : `Follow-up ${r.seq.step} on ${fmtShort(r.seq.nextAt)}${r.seq.approvedStep >= r.seq.step ? " (approved)" : " (needs your OK when due)"}`) : esc(r.seq.stopReason || r.seq.status)}${r.seq.lastSent ? `<div class="sub">Last email ${fmtShort(r.seq.lastSent)}</div>` : ""}${r.replied ? `<div><span class="pill ${CAT_PILL[r.replied.category] || "p-info"}">${esc(CAT_LABEL[r.replied.category] || "Replied")}</span></div>` : ""}${r.seq.status === "active" || /as you chose|you chose/.test(r.seq.stopReason || "") ? seqStepsSelect(r) : ""}</td>
-        <td>${r.seq.status === "active" ? `<button class="btn sm danger" data-cstop="${r.seq.id}">Stop</button>` : `<button class="btn sm" data-copen="${r.employerId}">Open</button>`}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Nobody here yet.</div>'}</section>`;
+    body = `<section class="card"><div class="ch"><h2>${CSTAGES.find((x) => x[0] === C.tab)[1]} · ${rows.length}</h2>${searchBox}</div>${rows.length ? `<div class="tablewrap"><table class="ctable"><colgroup><col style="width:24%"><col style="width:28%"><col><col style="width:185px"></colgroup><tbody>
+      ${rows.map((r) => `<tr><td>${campWho(r)}</td><td>${campWhere(r)}</td><td class="sm">${r.seq.status === "active" ? (r.seq.editing ? `<span class="pill p-warn">Paused while you edit</span> ` : "") + (r.seq.step === 0 ? `Initial email approved, waiting to send` : `Follow-up ${r.seq.step} on ${fmtShort(r.seq.nextAt)}${r.seq.approvedStep >= r.seq.step ? " (approved)" : " (needs your OK when due)"}`) : esc(r.seq.stopReason || r.seq.status)}${r.seq.lastSent ? `<div class="sub">Last email ${fmtShort(r.seq.lastSent)}</div>` : ""}${r.replied ? `<div><span class="pill ${CAT_PILL[r.replied.category] || "p-info"}">${esc(CAT_LABEL[r.replied.category] || "Replied")}</span></div>` : ""}${r.seq.status === "active" || /as you chose|you chose/.test(r.seq.stopReason || "") ? seqStepsSelect(r) : ""}</td>
+        <td><div class="actions" style="flex-direction:column;align-items:stretch">${r.seq.status === "active" ? `${editBtn(r)}<button class="btn sm danger" data-cstop="${r.seq.id}">Stop</button>` : `<button class="btn sm" data-copen="${r.employerId}">Open</button>`}</div></td></tr>${campPreviewRow(r, 4)}`).join("")}</tbody></table></div>` : '<div class="empty">Nobody here yet.</div>'}</section>`;
   } else if (C.tab === "skipped") {
     body = `<section class="card"><div class="ch"><h2>Skipped · ${rows.length}</h2>${searchBox}</div>${rows.length ? `<div class="tablewrap"><table class="ctable"><tbody>${rows.map((r) => `<tr><td>${campWho(r)}</td><td>${campWhere(r)}</td><td class="sm">${esc(r.decisionNote || "")}</td><td style="width:140px"><button class="btn sm" data-cunskip="${esc(r.email)}">Move back to review</button></td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Nobody skipped.</div>'}</section>`;
   } else if (C.tab === "nocontact") {
@@ -771,6 +777,13 @@ async function campaignClick(t) {
   const pv = t.closest("[data-cprev]");
   if (pv) { const step = Number(pv.dataset.step); if (C.preview?.email === pv.dataset.cprev && C.preview.step === step && !pv.closest(".tabs")) C.preview = null; else C.preview = { email: pv.dataset.cprev, step, data: null }; renderAll(); return true; }
   const tp = t.closest("[data-ctpl]"); if (tp) { C.tpl = tp.dataset.ctpl; renderAll(); return true; }
+  const ed = t.closest("[data-cedit]");
+  if (ed) {
+    try { const r = await api(`/api/campaigns/${id}/editing`, { method: "POST", body: { seqId: Number(ed.dataset.cedit), on: true } }); C.preview = { email: ed.dataset.email, step: r.step, data: null, editing: true, seqId: Number(ed.dataset.cedit) }; toast(r.message); }
+    catch (e) { toast(e.message, true); }
+    renderAll(); return true;
+  }
+  const rs = t.closest("[data-cresume]"); if (rs) { if (C.preview?.seqId === Number(rs.dataset.cresume)) C.preview = null; act(api(`/api/campaigns/${id}/editing`, { method: "POST", body: { seqId: Number(rs.dataset.cresume), on: false } })); return true; }
   const op = t.closest("[data-copen]"); if (op) { ui.drawer = Number(op.dataset.copen); renderDrawer(); return true; }
   const st = t.closest("[data-cstop]"); if (st) { if (!confirm("Stop this person's campaign emails?")) return true; act(api(`/api/campaigns/${id}/stop`, { method: "POST", body: { seqId: Number(st.dataset.cstop) } })); return true; }
   const un = t.closest("[data-cunskip]"); if (un) { act(api(`/api/campaigns/${id}/unskip`, { method: "POST", body: { emails: [un.dataset.cunskip] } })); return true; }
@@ -792,10 +805,17 @@ async function campaignClick(t) {
     case "toggle": act(api(`/api/campaigns/${id}`, { method: "PUT", body: { active: !/Pause/.test(a.textContent) ? true : false } })); return true;
     case "more": C.lim += 50; renderAll(); return true;
     case "resetTpl": if (!confirm("Restore this email to the original wording?")) return true; await act(api(`/api/campaigns/${id}`, { method: "PUT", body: { resetTemplate: C.tpl || "initial_opening" } }), "Restored"); return true;
-    case "closePreview": C.preview = null; renderAll(); return true;
+    case "closePreview": { const P = C.preview; C.preview = null; if (P?.seqId) await act(api(`/api/campaigns/${id}/editing`, { method: "POST", body: { seqId: P.seqId, on: false } })); else renderAll(); return true; }
     case "edit": C.preview.editing = true; renderAll(); return true;
-    case "cancelEdit": C.preview.editing = false; renderAll(); return true;
-    case "saveDraft": { const P = C.preview; await act(api(`/api/campaigns/${id}/draft`, { method: "PUT", body: { email: P.email, step: P.step, subject: document.getElementById("cd-subj").value, body: document.getElementById("cd-body").value } })); P.editing = false; P.data = null; renderAll(); return true; }
+    case "cancelEdit": { const P = C.preview; if (P.seqId) { C.preview = null; await act(api(`/api/campaigns/${id}/editing`, { method: "POST", body: { seqId: P.seqId, on: false } })); return true; } P.editing = false; renderAll(); return true; }
+    case "saveDraft": {
+      const P = C.preview;
+      try { await api(`/api/campaigns/${id}/draft`, { method: "PUT", body: { email: P.email, step: P.step, subject: document.getElementById("cd-subj").value, body: document.getElementById("cd-body").value } }); }
+      catch (e) { toast(e.message, true); return true; }
+      if (P.seqId) { await api(`/api/campaigns/${id}/editing`, { method: "POST", body: { seqId: P.seqId, on: false } }).catch(() => {}); toast("Saved. It will send in its turn."); C.preview = null; }
+      else { toast("Saved for this person"); P.editing = false; P.data = null; }
+      renderAll(); return true;
+    }
     case "resetDraft": { const P = C.preview; await act(api(`/api/campaigns/${id}/draft`, { method: "DELETE", body: { email: P.email, step: P.step } })); P.data = null; renderAll(); return true; }
     case "saveSetup": {
       const v = (x) => document.getElementById(x)?.value;

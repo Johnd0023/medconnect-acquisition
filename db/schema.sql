@@ -303,3 +303,4 @@ ALTER TABLE sequences ADD COLUMN IF NOT EXISTS hold_note text;
 CREATE INDEX IF NOT EXISTS sequences_campaign_ix ON sequences (campaign_id) WHERE campaign_id IS NOT NULL;
 INSERT INTO campaigns (slug, name, client) VALUES ('commonspirit', 'CommonSpirit MSA', 'CommonSpirit Health') ON CONFLICT (slug) DO NOTHING;
 ALTER TABLE sequences ADD COLUMN IF NOT EXISTS max_steps int NOT NULL DEFAULT 3;
+ALTER TABLE sequences ADD COLUMN IF NOT EXISTS editing boolean NOT NULL DEFAULT false;
