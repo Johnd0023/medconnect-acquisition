@@ -145,7 +145,9 @@ export const routes = {
   'POST /api/campaigns/:id/approve': async ({ params, body }) => {
     const emails = (body.emails || []).map(String).filter(Boolean);
     if (!emails.length) throw httpError(400, 'Tick at least one person.');
-    const r = await campaigns.approvePeople(params.id, emails, body.steps);
+    const steps = body.stepsByEmail && typeof body.stepsByEmail === 'object'
+      ? Object.fromEntries(Object.entries(body.stepsByEmail).map(([k, v]) => [String(k).toLowerCase(), Number(v)])) : body.steps;
+    const r = await campaigns.approvePeople(params.id, emails, steps);
     return { ok: true, message: `${r.queued} approved and queued${r.skipped.length ? `. Not queued: ${r.skipped.join('; ')}` : ''}.` };
   },
   'POST /api/campaigns/:id/steps': async ({ params, body }) => {

@@ -145,7 +145,7 @@ test('initial only, then extend', async () => {
   await q(`DELETE FROM sequences WHERE campaign_id = $1`, [camp.id]);
   await q(`UPDATE sequences SET status = 'stopped' WHERE status IN ('active','paused')`);
   await q(`DELETE FROM messages`); await q(`DELETE FROM campaign_contacts`);
-  await routes['POST /api/campaigns/:id/approve']({ params: { id: String(camp.id) }, body: { emails: ['amy.lee@dignityhealth.org'], steps: 1 } });
+  await routes['POST /api/campaigns/:id/approve']({ params: { id: String(camp.id) }, body: { emails: ['amy.lee@dignityhealth.org'], stepsByEmail: { 'amy.lee@dignityhealth.org': 1 } } });
   const r = await sendTick({ force: true });
   assert.equal(r.to, 'amy.lee@dignityhealth.org');
   let s = await one(`SELECT * FROM sequences WHERE campaign_id = $1`, [camp.id]);

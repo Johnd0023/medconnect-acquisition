@@ -306,7 +306,8 @@ export async function approvePeople(campaignId, emails, steps = null) {
     if (r.seq) { skipped.push(`${r.email} (already received the campaign)`); continue; }
     const busy = await one(`SELECT 1 FROM sequences WHERE contact_id = $1 AND status = 'active'`, [r.contactId]);
     if (busy) { skipped.push(`${r.email} (in a regular outreach sequence right now)`); continue; }
-    const max = Math.max(1, Math.min(3, Number(steps || camp.settings.defaultSteps) || 3));
+    const want = steps && typeof steps === 'object' ? steps[r.email] : steps;
+    const max = Math.max(1, Math.min(3, Number(want || camp.settings.defaultSteps) || 3));
     const approvedStep = camp.settings.approveFollowUps ? 0 : max - 1;
     await q(`INSERT INTO sequences (employer_id, contact_id, step, next_at, status, campaign_id, approved_step, approved_at, priority, max_steps) VALUES ($1,$2,0, now(),'active',$3,$4, now(), 0, $5)`,
       [r.employerId, r.contactId, camp.id, approvedStep, max]);
